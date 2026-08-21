@@ -1,6 +1,7 @@
 import os
 import time
 import secrets
+import gc
 
 import cv2
 import joblib
@@ -32,6 +33,11 @@ load_dotenv()
 
 app = Flask(__name__)
 
+
+# ============================================================
+# CORS
+# ============================================================
+
 CORS(
     app,
     resources={
@@ -39,8 +45,16 @@ CORS(
             "origins": "*"
         }
     },
-    methods=["GET", "POST", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"]
+    methods=[
+        "GET",
+        "POST",
+        "DELETE",
+        "OPTIONS"
+    ],
+    allow_headers=[
+        "Content-Type",
+        "Authorization"
+    ]
 )
 
 
@@ -57,10 +71,11 @@ GOOGLE_CLIENT_ID = os.getenv(
 # ============================================================
 # APPLICATION AUTH TOKENS
 #
-# This is an in-memory token store for development.
+# Development/simple production setup.
 #
-# For production, use a database/Redis/JWT authentication
-# system instead.
+# NOTE:
+# Render restarts can clear this dictionary.
+# For permanent authentication use JWT/database/Redis.
 # ============================================================
 
 AUTH_TOKENS = {}
@@ -114,15 +129,44 @@ MAX_PREDICTIONS = 100
 
 mp_hands = mp.solutions.hands
 
-hands = mp_hands.Hands(
-    static_image_mode=True,
-    max_num_hands=1,
-    min_detection_confidence=0.5
-)
+hands = None
+
+
+def get_hands():
+    """
+    Lazily initialize MediaPipe Hands.
+
+    Lazy initialization reduces startup memory pressure
+    and avoids creating the MediaPipe pipeline before it
+    is actually required.
+    """
+
+    global hands
+
+    if hands is None:
+
+        print()
+        print("=" * 70)
+        print("INITIALIZING MEDIAPIPE HANDS")
+        print("=" * 70)
+
+        hands = mp_hands.Hands(
+            static_image_mode=True,
+            max_num_hands=1,
+            model_complexity=0,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
+
+        print("MediaPipe Hands initialized.")
+        print("=" * 70)
+        print()
+
+    return hands
 
 
 # ============================================================
-# HELPER - SAFE NUMBER
+# SAFE NUMBER
 # ============================================================
 
 def safe_number(value, default=None):
@@ -144,14 +188,15 @@ def safe_number(value, default=None):
 
 
 # ============================================================
-# HELPER - FORMAT ACCURACY
+# FORMAT ACCURACY
 # ============================================================
 
 def format_accuracy(value):
     """
     Normalize accuracy values.
 
-    Supports:
+    Example:
+
         0.9363 -> 93.63
         93.63  -> 93.63
     """
@@ -171,17 +216,12 @@ def format_accuracy(value):
 
 
 # ============================================================
-# GOOGLE AUTH - CREATE APP TOKEN
+# CREATE APPLICATION AUTH TOKEN
 # ============================================================
 
 def create_auth_token(user):
     """
     Create a random application authentication token.
-
-    This token is stored in memory for development.
-
-    For production, replace this with JWT/database-backed
-    authentication.
     """
 
     token = secrets.token_urlsafe(48)
@@ -200,6 +240,7 @@ def create_auth_token(user):
 # POST /api/auth/google
 #
 # Body:
+#
 # {
 #     "credential": "GOOGLE_ID_TOKEN"
 # }
@@ -212,10 +253,6 @@ def create_auth_token(user):
 def google_login():
 
     try:
-
-        # ====================================================
-        # CHECK GOOGLE CLIENT ID
-        # ====================================================
 
         if not GOOGLE_CLIENT_ID:
 
@@ -232,10 +269,6 @@ def google_login():
 
             }), 500
 
-
-        # ====================================================
-        # READ REQUEST
-        # ====================================================
 
         data = request.get_json(
             silent=True
@@ -271,7 +304,7 @@ def google_login():
 
 
         # ====================================================
-        # VERIFY GOOGLE ID TOKEN
+        # VERIFY GOOGLE TOKEN
         # ====================================================
 
         try:
@@ -323,7 +356,7 @@ def google_login():
 
 
         # ====================================================
-        # GET GOOGLE INFORMATION
+        # GOOGLE INFORMATION
         # ====================================================
 
         google_id = google_user.get(
@@ -464,7 +497,7 @@ def google_login():
 
 
         # ====================================================
-        # CREATE APPLICATION TOKEN
+        # CREATE TOKEN
         # ====================================================
 
         app_token = create_auth_token(
@@ -472,13 +505,9 @@ def google_login():
         )
 
 
-        # ====================================================
-        # CONSOLE
-        # ====================================================
-
         print()
         print("=" * 70)
-        print("                    GOOGLE LOGIN")
+        print("GOOGLE LOGIN")
         print("=" * 70)
 
         print(
@@ -505,10 +534,6 @@ def google_login():
         print()
 
 
-        # ====================================================
-        # RESPONSE
-        # ====================================================
-
         return jsonify({
 
             "success": True,
@@ -527,12 +552,10 @@ def google_login():
 
     except Exception as error:
 
-        print()
         print(
             "Google Login Error:",
             error
         )
-        print()
 
         return jsonify({
 
@@ -548,11 +571,9 @@ def google_login():
 
 
 # ============================================================
-# AUTH USER
+# CURRENT USER
 #
 # GET /api/auth/me
-#
-# Optional endpoint to check current application token.
 # ============================================================
 
 @app.route(
@@ -565,6 +586,7 @@ def get_current_user():
         "Authorization",
         ""
     )
+
 
     if not authorization.startswith(
         "Bearer "
@@ -643,6 +665,7 @@ def logout():
         ""
     )
 
+
     if authorization.startswith(
         "Bearer "
     ):
@@ -686,13 +709,20 @@ def load_model():
 
     print()
     print("=" * 70)
-    print("                  LOADING SIGN MODEL")
+    print("LOADING SIGN MODEL")
     print("=" * 70)
     print()
 
-    print("Model path:")
-    print(MODEL_PATH)
+    print(
+        "Model path:"
+    )
+
+    print(
+        MODEL_PATH
+    )
+
     print()
+
 
     if not os.path.exists(
         MODEL_PATH
@@ -701,8 +731,6 @@ def load_model():
         print(
             "ERROR: Model file not found."
         )
-
-        print()
 
         MODEL_LOADED = False
 
@@ -717,7 +745,7 @@ def load_model():
 
 
         # ====================================================
-        # RANDOM FOREST MODEL
+        # MODEL
         # ====================================================
 
         MODEL = MODEL_DATA.get(
@@ -812,7 +840,7 @@ def load_model():
 
 
         # ====================================================
-        # DATASET INFORMATION
+        # DATASET
         # ====================================================
 
         DATASET_INFO = MODEL_DATA.get(
@@ -856,7 +884,7 @@ def load_model():
 
 
         # ====================================================
-        # CONSOLE
+        # LOG
         # ====================================================
 
         print(
@@ -941,9 +969,7 @@ def load_model():
 # 21 landmarks × 3 coordinates = 63 features
 # ============================================================
 
-def extract_landmarks_from_image(
-    image
-):
+def extract_landmarks_from_image(image):
 
     if image is None:
 
@@ -952,13 +978,75 @@ def extract_landmarks_from_image(
 
     try:
 
+        # ====================================================
+        # BGR -> RGB
+        # ====================================================
+
         image_rgb = cv2.cvtColor(
             image,
             cv2.COLOR_BGR2RGB
         )
 
 
-        results = hands.process(
+        # ====================================================
+        # RESIZE IMAGE
+        #
+        # Limit image size to reduce memory/CPU usage.
+        # ====================================================
+
+        height, width = image_rgb.shape[:2]
+
+        max_dimension = 640
+
+
+        if max(
+            height,
+            width
+        ) > max_dimension:
+
+            scale = (
+                max_dimension /
+                max(
+                    height,
+                    width
+                )
+            )
+
+
+            new_width = max(
+                1,
+                int(
+                    width * scale
+                )
+            )
+
+
+            new_height = max(
+                1,
+                int(
+                    height * scale
+                )
+            )
+
+
+            image_rgb = cv2.resize(
+                image_rgb,
+                (
+                    new_width,
+                    new_height
+                ),
+                interpolation=cv2.INTER_AREA
+            )
+
+
+        # ====================================================
+        # MEDIAPIPE
+        # ====================================================
+
+        hands_detector = get_hands()
+
+
+        results = hands_detector.process(
             image_rgb
         )
 
@@ -972,8 +1060,13 @@ def extract_landmarks_from_image(
 
         wrist = hand.landmark[0]
 
+
         features = []
 
+
+        # ====================================================
+        # 21 LANDMARKS
+        # ====================================================
 
         for landmark in hand.landmark:
 
@@ -990,13 +1083,21 @@ def extract_landmarks_from_image(
             ])
 
 
-        features = np.array(
+        # ====================================================
+        # NUMPY ARRAY
+        # ====================================================
+
+        features = np.asarray(
             features,
             dtype=np.float32
         )
 
 
         if len(features) != 63:
+
+            print(
+                f"Invalid feature count: {len(features)}"
+            )
 
             return None
 
@@ -1021,9 +1122,7 @@ def extract_landmarks_from_image(
 # GET SIGN METRICS
 # ============================================================
 
-def get_sign_metrics(
-    label
-):
+def get_sign_metrics(label):
 
     result = {
 
@@ -1075,6 +1174,10 @@ def get_sign_metrics(
         return result
 
 
+    # ========================================================
+    # RECALL
+    # ========================================================
+
     recall = metrics.get(
         "recall"
     )
@@ -1119,6 +1222,10 @@ def get_sign_metrics(
             pass
 
 
+    # ========================================================
+    # SUPPORT
+    # ========================================================
+
     support = metrics.get(
         "support"
     )
@@ -1151,11 +1258,10 @@ def get_sign_metrics(
 # SAVE PREDICTION
 # ============================================================
 
-def save_prediction(
-    prediction
-):
+def save_prediction(prediction):
 
     global PREDICTIONS
+
 
     PREDICTIONS.insert(
         0,
@@ -1163,7 +1269,9 @@ def save_prediction(
     )
 
 
-    if len(PREDICTIONS) > MAX_PREDICTIONS:
+    if len(
+        PREDICTIONS
+    ) > MAX_PREDICTIONS:
 
         PREDICTIONS = PREDICTIONS[
             :MAX_PREDICTIONS
@@ -1171,7 +1279,7 @@ def save_prediction(
 
 
 # ============================================================
-# COMMON PREDICTION FUNCTION
+# COMMON PREDICTION
 # ============================================================
 
 def process_prediction(
@@ -1198,16 +1306,186 @@ def process_prediction(
         }, 500
 
 
-    # ========================================================
-    # LANDMARK EXTRACTION
-    # ========================================================
+    try:
 
-    features = extract_landmarks_from_image(
-        image
-    )
+        # ====================================================
+        # LANDMARK EXTRACTION
+        # ====================================================
+
+        features = extract_landmarks_from_image(
+            image
+        )
 
 
-    if features is None:
+        if features is None:
+
+            processing_time = (
+                time.perf_counter()
+                - start_time
+            ) * 1000
+
+
+            return {
+
+                "success": False,
+
+                "message":
+                    "No hand detected in the image. "
+                    "Please keep your hand fully visible "
+                    "inside the camera frame.",
+
+                "processing_time_ms":
+                    round(
+                        processing_time,
+                        2
+                    )
+
+            }, 400
+
+
+        # ====================================================
+        # FEATURE COUNT
+        # ====================================================
+
+        expected_features = MODEL_DATA.get(
+            "feature_count",
+            63
+        )
+
+
+        if features.shape[1] != expected_features:
+
+            return {
+
+                "success": False,
+
+                "message":
+                    "Feature count mismatch.",
+
+                "expected_features":
+                    expected_features,
+
+                "received_features":
+                    features.shape[1]
+
+            }, 500
+
+
+        # ====================================================
+        # MODEL PREDICTION
+        # ====================================================
+
+        prediction = MODEL.predict(
+            features
+        )
+
+
+        predicted_label = str(
+            prediction[0]
+        ).strip().upper()
+
+
+        # ====================================================
+        # CONFIDENCE
+        # ====================================================
+
+        confidence = None
+
+
+        if hasattr(
+            MODEL,
+            "predict_proba"
+        ):
+
+            probabilities = MODEL.predict_proba(
+                features
+            )[0]
+
+
+            if hasattr(
+                MODEL,
+                "classes_"
+            ):
+
+                class_names = [
+
+                    str(item)
+                    .strip()
+                    .upper()
+
+                    for item in MODEL.classes_
+
+                ]
+
+            else:
+
+                class_names = []
+
+
+            if predicted_label in class_names:
+
+                predicted_index = class_names.index(
+                    predicted_label
+                )
+
+
+                if predicted_index < len(
+                    probabilities
+                ):
+
+                    confidence = float(
+                        probabilities[
+                            predicted_index
+                        ]
+                    )
+
+
+        if confidence is None:
+
+            confidence = 0.0
+
+
+        confidence = min(
+            1.0,
+            max(
+                0.0,
+                confidence
+            )
+        )
+
+
+        confidence_percent = round(
+            confidence * 100,
+            2
+        )
+
+
+        # ====================================================
+        # SIGN METRICS
+        # ====================================================
+
+        sign_metrics = get_sign_metrics(
+            predicted_label
+        )
+
+
+        sign_accuracy_percent = (
+            sign_metrics[
+                "sign_accuracy_percent"
+            ]
+        )
+
+
+        support = (
+            sign_metrics[
+                "support"
+            ]
+        )
+
+
+        # ====================================================
+        # PROCESSING TIME
+        # ====================================================
 
         processing_time = (
             time.perf_counter()
@@ -1215,301 +1493,179 @@ def process_prediction(
         ) * 1000
 
 
-        return {
+        processing_time_ms = round(
+            processing_time,
+            2
+        )
 
-            "success": False,
 
-            "message":
-                "No hand detected in the image. "
-                "Please keep your hand fully visible "
-                "inside the camera frame.",
+        # ====================================================
+        # RESPONSE
+        # ====================================================
+
+        response = {
+
+            "success": True,
+
+            "label":
+                predicted_label,
+
+            "predicted_label":
+                predicted_label,
+
+            "prediction":
+                predicted_label,
+
+            "confidence":
+                round(
+                    confidence,
+                    6
+                ),
+
+            "confidence_percent":
+                confidence_percent,
+
+            "sign_accuracy_percent":
+                sign_accuracy_percent,
+
+            "sign_accuracy":
+                sign_accuracy_percent,
+
+            "support":
+                support,
 
             "processing_time_ms":
-                round(
-                    processing_time,
-                    2
-                )
+                processing_time_ms,
 
-        }, 400
+            "model":
+                "Random Forest Classifier",
+
+            "model_name":
+                "Random Forest Classifier",
+
+            "feature_count":
+                int(
+                    features.shape[1]
+                ),
+
+            "source":
+                source,
+
+            "timestamp":
+                time.time()
+        }
 
 
-    # ========================================================
-    # FEATURE COUNT
-    # ========================================================
+        # ====================================================
+        # SAVE HISTORY
+        # ====================================================
 
-    expected_features = MODEL_DATA.get(
-        "feature_count",
-        63
-    )
+        save_prediction(
+            response
+        )
 
 
-    if features.shape[1] != expected_features:
+        # ====================================================
+        # LOG
+        # ====================================================
+
+        print()
+        print("=" * 70)
+        print("PREDICTION")
+        print("=" * 70)
+
+        print(
+            f"Source:               {source}"
+        )
+
+        print(
+            f"Predicted Sign:       {predicted_label}"
+        )
+
+        print(
+            f"Confidence:           {confidence_percent:.2f}%"
+        )
+
+
+        if sign_accuracy_percent is not None:
+
+            print(
+                f"Sign Accuracy:        "
+                f"{sign_accuracy_percent:.2f}%"
+            )
+
+        else:
+
+            print(
+                "Sign Accuracy:        N/A"
+            )
+
+
+        print(
+            f"Processing Time:      "
+            f"{processing_time_ms} ms"
+        )
+
+        print(
+            "Model:                "
+            "Random Forest Classifier"
+        )
+
+        print("=" * 70)
+        print()
+
+
+        return response, 200
+
+
+    except Exception as error:
+
+        print()
+        print("=" * 70)
+        print("PREDICTION PROCESSING ERROR")
+        print("=" * 70)
+        print(
+            "Error:",
+            error
+        )
+        print("=" * 70)
+        print()
+
 
         return {
 
             "success": False,
 
             "message":
-                "Feature count mismatch.",
+                "Prediction processing failed.",
 
-            "expected_features":
-                expected_features,
-
-            "received_features":
-                features.shape[1]
+            "error":
+                str(error)
 
         }, 500
 
 
-    # ========================================================
-    # MODEL PREDICTION
-    # ========================================================
-
-    prediction = MODEL.predict(
-        features
-    )
-
-
-    predicted_label = str(
-        prediction[0]
-    ).strip().upper()
-
-
-    # ========================================================
-    # CONFIDENCE
-    # ========================================================
-
-    confidence = None
-
-
-    if hasattr(
-        MODEL,
-        "predict_proba"
-    ):
-
-        probabilities = MODEL.predict_proba(
-            features
-        )[0]
-
-
-        if hasattr(
-            MODEL,
-            "classes_"
-        ):
-
-            class_names = [
-
-                str(item)
-                .strip()
-                .upper()
-
-                for item in MODEL.classes_
-
-            ]
-
-        else:
-
-            class_names = []
-
-
-        if predicted_label in class_names:
-
-            predicted_index = class_names.index(
-                predicted_label
-            )
-
-
-            if predicted_index < len(
-                probabilities
-            ):
-
-                confidence = float(
-                    probabilities[
-                        predicted_index
-                    ]
-                )
-
-
-    if confidence is None:
-
-        confidence = 0.0
-
-
-    confidence = min(
-        1.0,
-        max(
-            0.0,
-            confidence
-        )
-    )
-
-
-    confidence_percent = round(
-        confidence * 100,
-        2
-    )
-
-
-    # ========================================================
-    # SIGN ACCURACY
-    # ========================================================
-
-    sign_metrics = get_sign_metrics(
-        predicted_label
-    )
-
-
-    sign_accuracy_percent = (
-        sign_metrics[
-            "sign_accuracy_percent"
-        ]
-    )
-
-
-    support = (
-        sign_metrics[
-            "support"
-        ]
-    )
-
-
-    # ========================================================
-    # PROCESSING TIME
-    # ========================================================
-
-    processing_time = (
-        time.perf_counter()
-        - start_time
-    ) * 1000
-
-
-    processing_time_ms = round(
-        processing_time,
-        2
-    )
-
-
-    # ========================================================
-    # RESPONSE
-    # ========================================================
-
-    response = {
-
-        "success": True,
-
-        "label":
-            predicted_label,
-
-        "predicted_label":
-            predicted_label,
-
-        "prediction":
-            predicted_label,
-
-        "confidence":
-            round(
-                confidence,
-                6
-            ),
-
-        "confidence_percent":
-            confidence_percent,
-
-        "sign_accuracy_percent":
-            sign_accuracy_percent,
-
-        "sign_accuracy":
-            sign_accuracy_percent,
-
-        "support":
-            support,
-
-        "processing_time_ms":
-            processing_time_ms,
-
-        "model":
-            "Random Forest Classifier",
-
-        "model_name":
-            "Random Forest Classifier",
-
-        "feature_count":
-            int(
-                features.shape[1]
-            ),
-
-        "source":
-            source,
-
-        "timestamp":
-            time.time()
-    }
-
-
-    # ========================================================
-    # SAVE HISTORY
-    # ========================================================
-
-    save_prediction(
-        response
-    )
-
-
-    # ========================================================
-    # CONSOLE
-    # ========================================================
-
-    print()
-    print("=" * 70)
-    print("                    PREDICTION")
-    print("=" * 70)
-
-    print(
-        f"Source:               {source}"
-    )
-
-    print(
-        f"Predicted Sign:       {predicted_label}"
-    )
-
-    print(
-        f"Confidence:           {confidence_percent:.2f}%"
-    )
-
-
-    if sign_accuracy_percent is not None:
-
-        print(
-            f"Sign Accuracy:        "
-            f"{sign_accuracy_percent:.2f}%"
-        )
-
-    else:
-
-        print(
-            "Sign Accuracy:        N/A"
-        )
-
-
-    print(
-        f"Processing Time:      "
-        f"{processing_time_ms} ms"
-    )
-
-
-    print(
-        "Model:                "
-        "Random Forest Classifier"
-    )
-
-    print("=" * 70)
-
-
-    return response, 200
+    finally:
+
+        # ====================================================
+        # CLEAN TEMPORARY MEMORY
+        # ====================================================
+
+        try:
+            del image
+        except Exception:
+            pass
+
+        try:
+            gc.collect()
+        except Exception:
+            pass
 
 
 # ============================================================
 # HEALTH
+#
+# GET /api/health
 # ============================================================
 
 @app.route(
@@ -1608,6 +1764,8 @@ def health():
 
 # ============================================================
 # MODEL INFO
+#
+# GET /api/model-info
 # ============================================================
 
 @app.route(
@@ -1634,9 +1792,11 @@ def model_info():
 
     return jsonify({
 
-        "success": True,
+        "success":
+            True,
 
-        "model_loaded": True,
+        "model_loaded":
+            True,
 
         "model":
             "Random Forest Classifier",
@@ -1697,6 +1857,7 @@ def model_info():
 # POST /api/predict
 #
 # FormData:
+#
 # image = image file
 # ============================================================
 
@@ -1744,6 +1905,29 @@ def predict():
 
             }), 400
 
+
+        # ====================================================
+        # LIMIT UPLOAD SIZE
+        # ====================================================
+
+        max_upload_size = 10 * 1024 * 1024
+
+        if len(file_bytes) > max_upload_size:
+
+            return jsonify({
+
+                "success":
+                    False,
+
+                "message":
+                    "Image is too large. Maximum size is 10 MB."
+
+            }), 413
+
+
+        # ====================================================
+        # DECODE IMAGE
+        # ====================================================
 
         image_array = np.frombuffer(
             file_bytes,
@@ -1809,6 +1993,7 @@ def predict():
 # POST /api/predict/frame
 #
 # FormData:
+#
 # frame = image file
 # ============================================================
 
@@ -1858,6 +2043,29 @@ def predict_frame():
 
             }), 400
 
+
+        # ====================================================
+        # LIMIT FRAME SIZE
+        # ====================================================
+
+        max_frame_size = 5 * 1024 * 1024
+
+        if len(file_bytes) > max_frame_size:
+
+            return jsonify({
+
+                "success":
+                    False,
+
+                "message":
+                    "Webcam frame is too large."
+
+            }), 413
+
+
+        # ====================================================
+        # DECODE FRAME
+        # ====================================================
 
         image_array = np.frombuffer(
             file_bytes,
@@ -1945,6 +2153,8 @@ def get_predictions():
 
 # ============================================================
 # CLEAR PREDICTION HISTORY
+#
+# DELETE /api/predictions
 # ============================================================
 
 @app.route(
@@ -1971,6 +2181,8 @@ def clear_predictions():
 
 # ============================================================
 # ROOT
+#
+# GET /
 # ============================================================
 
 @app.route(
@@ -2025,6 +2237,29 @@ def root():
 
 
 # ============================================================
+# STARTUP
+# ============================================================
+
+print()
+print("=" * 70)
+print("SIGN AI BACKEND STARTING")
+print("=" * 70)
+print()
+
+print(
+    "Model:",
+    MODEL_PATH
+)
+
+print(
+    "Google Auth:",
+    bool(GOOGLE_CLIENT_ID)
+)
+
+print()
+
+
+# ============================================================
 # LOAD MODEL
 # ============================================================
 
@@ -2032,210 +2267,71 @@ load_model()
 
 
 # ============================================================
-# START SERVER
+# LOCAL DEVELOPMENT
 # ============================================================
 
 if __name__ == "__main__":
 
     print()
     print("=" * 70)
-    print("                    SignAI Backend")
+    print("SIGN AI BACKEND")
     print("=" * 70)
 
     print()
-
-    print(
-        "Server:"
-    )
-
-    print(
-        "http://localhost:5000"
-    )
+    print("Server:")
+    print("http://localhost:5000")
 
     print()
-
-    print(
-        "Health:"
-    )
-
-    print(
-        "http://localhost:5000/api/health"
-    )
+    print("Health:")
+    print("http://localhost:5000/api/health")
 
     print()
-
-    print(
-        "Model Info:"
-    )
-
-    print(
-        "http://localhost:5000/api/model-info"
-    )
+    print("Model Info:")
+    print("http://localhost:5000/api/model-info")
 
     print()
-
-    print(
-        "Google Login:"
-    )
-
-    print(
-        "POST http://localhost:5000/api/auth/google"
-    )
+    print("Google Login:")
+    print("POST http://localhost:5000/api/auth/google")
 
     print()
-
-    print(
-        "Current User:"
-    )
-
-    print(
-        "GET http://localhost:5000/api/auth/me"
-    )
+    print("Current User:")
+    print("GET http://localhost:5000/api/auth/me")
 
     print()
-
-    print(
-        "Logout:"
-    )
-
-    print(
-        "POST http://localhost:5000/api/auth/logout"
-    )
+    print("Logout:")
+    print("POST http://localhost:5000/api/auth/logout")
 
     print()
-
-    print(
-        "Normal Prediction:"
-    )
-
-    print(
-        "POST http://localhost:5000/api/predict"
-    )
+    print("Normal Prediction:")
+    print("POST http://localhost:5000/api/predict")
 
     print()
-
-    print(
-        "LIVE Prediction:"
-    )
-
-    print(
-        "POST http://localhost:5000/api/predict/frame"
-    )
+    print("Live Prediction:")
+    print("POST http://localhost:5000/api/predict/frame")
 
     print()
-
-    print(
-        "Prediction History:"
-    )
-
-    print(
-        "GET http://localhost:5000/api/predictions"
-    )
+    print("Prediction History:")
+    print("GET http://localhost:5000/api/predictions")
 
     print()
-
-    print(
-        "Model:"
-    )
-
-    print(
-        MODEL_PATH
-    )
+    print("Model Loaded:")
+    print(MODEL_LOADED)
 
     print()
-
-    print(
-        "Model Loaded:"
-    )
-
-    print(
-        MODEL_LOADED
-    )
+    print("Google Auth Configured:")
+    print(bool(GOOGLE_CLIENT_ID))
 
     print()
-
-    print(
-        "Google Auth Configured:"
-    )
-
-    print(
-        bool(GOOGLE_CLIENT_ID)
-    )
-
-    print()
-
-    if MODEL_LOADED:
-
-        training_accuracy = format_accuracy(
-            PERFORMANCE.get(
-                "training_accuracy_percent"
-            )
-        )
-
-
-        validation_accuracy = format_accuracy(
-            PERFORMANCE.get(
-                "validation_accuracy_percent"
-            )
-        )
-
-
-        test_accuracy = format_accuracy(
-            PERFORMANCE.get(
-                "test_accuracy_percent"
-            )
-        )
-
-
-        print(
-            "Training Accuracy:"
-        )
-
-        print(
-            f"{training_accuracy if training_accuracy is not None else 'N/A'}%"
-        )
-
-        print()
-
-
-        print(
-            "Validation Accuracy:"
-        )
-
-        print(
-            f"{validation_accuracy if validation_accuracy is not None else 'N/A'}%"
-        )
-
-        print()
-
-
-        print(
-            "Overall Test Accuracy:"
-        )
-
-        print(
-            f"{test_accuracy if test_accuracy is not None else 'N/A'}%"
-        )
-
-        print()
-
-
-        print(
-            "Per-Class Metrics:"
-        )
-
-        print(
-            f"{len(PER_CLASS_METRICS)} classes loaded"
-        )
-
-
-    print()
-
     print("=" * 70)
 
 
     app.run(
         host="0.0.0.0",
-        port=5000,
-        debug=True
+        port=int(
+            os.getenv(
+                "PORT",
+                "5000"
+            )
+        ),
+        debug=False
     )
