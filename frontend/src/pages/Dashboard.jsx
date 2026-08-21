@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 
 import DashboardLayout from "../components/dashboard/DashboardLayout";
-import StatsCard from "../components/dashboard/StatsCard";
+import StatsCard from "../components/dashboard/Statscard";
 import PredictionHistory from "../components/dashboard/PredictionHistory";
 
 const API_URL =
