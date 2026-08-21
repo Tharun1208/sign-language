@@ -22,8 +22,7 @@ import DashboardLayout from "../components/dashboard/DashboardLayout";
 import StatsCard from "../components/dashboard/Statscard";
 import PredictionHistory from "../components/dashboard/PredictionHistory";
 
-const API_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:5000";
+const API_URL = import.meta.env.VITE_API_URL;
 
 const REFRESH_INTERVAL = 5000;
 
