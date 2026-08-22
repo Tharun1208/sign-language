@@ -1,0 +1,18 @@
+[
+    {
+        "id": "1a21f5e5ed4e92894c50777b6d581bc5",
+        "fullName": "Test User",
+        "name": "Test User",
+        "email": "test@gmail.com",
+        "passwordHash": "scrypt:32768:8:1$KDAHJdzDNrKkF2AR$bb854288169d2f5301a099eead19e7984c61e352b684c90b32415f2e36d3846172d9a8358100cf40f189fbc616458d9af3a57bc9779b3c5759d11979ba45fff9",
+        "phone": "",
+        "age": "",
+        "university": "",
+        "picture": "",
+        "profileImage": "",
+        "image": "",
+        "emailVerified": true,
+        "provider": "email",
+        "createdAt": 1787379298.0651443
+    }
+]
