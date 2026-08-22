@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import axios from "axios";
+
 import {
   UserPlus,
   User,
@@ -17,6 +19,9 @@ import {
   X,
   ArrowRight,
 } from "lucide-react";
+
+const API_URL =
+  import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 const Register = () => {
   const navigate = useNavigate();
@@ -109,8 +114,17 @@ const Register = () => {
     const password = form.password;
     const confirmPassword = form.confirmPassword;
 
+    // ---------------------------------------------------------
+    // VALIDATION
+    // ---------------------------------------------------------
+
     if (!fullName) {
       setError("Please enter your full name.");
+      return;
+    }
+
+    if (fullName.length < 2) {
+      setError("Full name must contain at least 2 characters.");
       return;
     }
 
@@ -119,10 +133,13 @@ const Register = () => {
       return;
     }
 
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+
     if (password.length < 6) {
-      setError(
-        "Password must contain at least 6 characters."
-      );
+      setError("Password must contain at least 6 characters.");
       return;
     }
 
@@ -131,27 +148,72 @@ const Register = () => {
       return;
     }
 
-    setIsLoading(true);
+    // ---------------------------------------------------------
+    // API REQUEST
+    // ---------------------------------------------------------
 
-    /*
-      ---------------------------------------------------------
-      TEMPORARY REGISTRATION
+    try {
+      setIsLoading(true);
 
-      Replace this section with your backend API when ready.
-      ---------------------------------------------------------
-    */
-
-    setTimeout(() => {
-      setIsLoading(false);
-
-      setSuccess(
-        "Account created successfully. Redirecting to login..."
+      const response = await axios.post(
+        `${API_URL}/api/auth/register`,
+        {
+          fullName,
+          email,
+          password,
+        },
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
       );
 
+      console.log("Registration response:", response.data);
+
+      setSuccess(
+        response.data?.message ||
+          "Account created successfully. Redirecting to login..."
+      );
+
+      // Clear form
+      setForm({
+        fullName: "",
+        email: "",
+        password: "",
+        confirmPassword: "",
+      });
+
+      // Redirect after successful registration
       setTimeout(() => {
-        navigate("/login");
-      }, 900);
-    }, 900);
+        navigate("/login", {
+          state: {
+            email,
+            message: "Registration successful. Please login.",
+          },
+        });
+      }, 1200);
+    } catch (err) {
+      console.error("Registration error:", err);
+
+      if (err.response) {
+        setError(
+          err.response.data?.message ||
+            err.response.data?.error ||
+            "Registration failed. Please try again."
+        );
+      } else if (err.request) {
+        setError(
+          "Unable to connect to the server. Please make sure the backend is running."
+        );
+      } else {
+        setError(
+          "Something went wrong. Please try again."
+        );
+      }
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -160,16 +222,12 @@ const Register = () => {
         relative
         min-h-screen
         overflow-hidden
-
         bg-slate-50
         text-slate-900
-
         dark:bg-slate-950
         dark:text-white
-
         selection:bg-indigo-500/20
         selection:text-indigo-700
-
         dark:selection:text-indigo-300
       "
     >
@@ -183,14 +241,10 @@ const Register = () => {
           absolute
           -left-40
           -top-40
-
           h-[28rem]
           w-[28rem]
-
           rounded-full
-
           bg-indigo-500/10
-
           blur-3xl
         "
       />
@@ -201,14 +255,10 @@ const Register = () => {
           absolute
           -bottom-40
           -right-40
-
           h-[30rem]
           w-[30rem]
-
           rounded-full
-
           bg-blue-500/10
-
           blur-3xl
         "
       />
@@ -219,17 +269,12 @@ const Register = () => {
           absolute
           left-1/2
           top-1/2
-
           h-72
           w-72
-
           -translate-x-1/2
           -translate-y-1/2
-
           rounded-full
-
           bg-indigo-400/5
-
           blur-3xl
         "
       />
@@ -243,11 +288,8 @@ const Register = () => {
           pointer-events-none
           absolute
           inset-0
-
           opacity-[0.025]
-
           dark:opacity-[0.04]
-
           [background-image:linear-gradient(#64748b_1px,transparent_1px),linear-gradient(90deg,#64748b_1px,transparent_1px)]
           [background-size:40px_40px]
         "
@@ -263,7 +305,6 @@ const Register = () => {
           left-3
           top-3
           z-30
-
           sm:left-6
           sm:top-6
         "
@@ -272,35 +313,25 @@ const Register = () => {
           to="/"
           className="
             group
-
             inline-flex
             items-center
             gap-2
-
             rounded-xl
-
             border
             border-transparent
-
             px-3
             py-2
-
             text-sm
             font-medium
-
             text-slate-600
-
             transition-all
             duration-300
-
             hover:-translate-x-1
             hover:border-slate-200
             hover:bg-white
             hover:text-indigo-600
             hover:shadow-lg
-
             dark:text-slate-400
-
             dark:hover:border-slate-800
             dark:hover:bg-slate-900
             dark:hover:text-indigo-400
@@ -311,14 +342,11 @@ const Register = () => {
             className="
               transition-transform
               duration-300
-
               group-hover:-translate-x-1
             "
           />
 
-          <span className="hidden xs:inline sm:inline">
-            Back to Home
-          </span>
+          <span>Back to Home</span>
         </Link>
       </div>
 
@@ -330,19 +358,14 @@ const Register = () => {
         className="
           relative
           z-10
-
           flex
           min-h-screen
-
           items-center
           justify-center
-
           px-4
           py-20
-
           sm:px-6
           sm:py-24
-
           lg:px-8
         "
       >
@@ -356,44 +379,31 @@ const Register = () => {
             className="
               mb-7
               text-center
-
               sm:mb-8
             "
           >
-            {/* LOGO */}
-
             <div
               className="
                 group
-
                 mx-auto
                 mb-5
-
                 flex
                 h-16
                 w-16
-
                 items-center
                 justify-center
-
                 rounded-2xl
-
                 border
                 border-indigo-200
-
                 bg-indigo-100
                 text-indigo-600
-
                 shadow-xl
                 shadow-indigo-500/10
-
                 transition-all
                 duration-500
-
                 hover:-translate-y-1
                 hover:scale-105
                 hover:rotate-2
-
                 dark:border-indigo-500/20
                 dark:bg-indigo-500/10
                 dark:text-indigo-400
@@ -404,13 +414,10 @@ const Register = () => {
                 className="
                   transition-transform
                   duration-500
-
                   group-hover:scale-110
                 "
               />
             </div>
-
-            {/* BRAND NAME */}
 
             <div
               className="
@@ -425,9 +432,7 @@ const Register = () => {
                   text-3xl
                   font-extrabold
                   tracking-tight
-
                   text-slate-900
-
                   dark:text-white
                 "
               >
@@ -438,9 +443,7 @@ const Register = () => {
                 size={18}
                 className="
                   animate-pulse
-
                   text-indigo-500
-
                   dark:text-indigo-400
                 "
               />
@@ -451,12 +454,9 @@ const Register = () => {
                 mx-auto
                 mt-2
                 max-w-sm
-
                 text-sm
                 leading-6
-
                 text-slate-500
-
                 dark:text-slate-400
               "
             >
@@ -471,64 +471,40 @@ const Register = () => {
           <section
             className="
               group/card
-
               relative
               overflow-hidden
-
               rounded-3xl
-
               border
-
               border-slate-200
               bg-white/95
-
               p-5
-
               shadow-2xl
               shadow-slate-900/10
-
               backdrop-blur-xl
-
               transition-all
               duration-500
-
               hover:border-indigo-200
               hover:shadow-indigo-500/10
-
               dark:border-slate-800
               dark:bg-slate-900/95
               dark:shadow-black/30
-
               dark:hover:border-indigo-500/20
-
               sm:p-8
             "
           >
-            {/* =================================================
-                CARD GLOW
-            ================================================= */}
+            {/* CARD GLOW */}
 
             <div
               className="
                 pointer-events-none
                 absolute
-
                 -right-24
                 -top-24
-
                 h-48
                 w-48
-
                 rounded-full
-
                 bg-indigo-500/10
-
                 blur-3xl
-
-                transition-opacity
-                duration-500
-
-                group-hover/card:opacity-100
               "
             />
 
@@ -536,17 +512,12 @@ const Register = () => {
               className="
                 pointer-events-none
                 absolute
-
                 -bottom-24
                 -left-24
-
                 h-48
                 w-48
-
                 rounded-full
-
                 bg-blue-500/10
-
                 blur-3xl
               "
             />
@@ -562,33 +533,24 @@ const Register = () => {
                 <div
                   className="
                     mb-3
-
                     inline-flex
                     items-center
                     gap-2
-
                     rounded-full
-
                     border
                     border-indigo-100
-
                     bg-indigo-50
-
                     px-3
                     py-1.5
-
                     text-xs
                     font-semibold
-
                     text-indigo-600
-
                     dark:border-indigo-500/20
                     dark:bg-indigo-500/10
                     dark:text-indigo-400
                   "
                 >
                   <Sparkles size={13} />
-
                   Get started
                 </div>
 
@@ -597,11 +559,8 @@ const Register = () => {
                     text-2xl
                     font-bold
                     tracking-tight
-
                     text-slate-900
-
                     dark:text-white
-
                     sm:text-3xl
                   "
                 >
@@ -611,14 +570,10 @@ const Register = () => {
                 <p
                   className="
                     mt-2
-
                     max-w-md
-
                     text-sm
                     leading-6
-
                     text-slate-500
-
                     dark:text-slate-400
                   "
                 >
@@ -636,25 +591,18 @@ const Register = () => {
                 <div
                   className="
                     mb-5
-
                     flex
                     items-start
                     gap-3
-
                     rounded-xl
-
                     border
                     border-red-200
-
                     bg-red-50
-
                     px-4
                     py-3
-
                     text-sm
                     leading-5
                     text-red-700
-
                     dark:border-red-500/20
                     dark:bg-red-500/10
                     dark:text-red-400
@@ -662,10 +610,7 @@ const Register = () => {
                 >
                   <AlertCircle
                     size={18}
-                    className="
-                      mt-0.5
-                      shrink-0
-                    "
+                    className="mt-0.5 shrink-0"
                   />
 
                   <span>{error}</span>
@@ -680,25 +625,18 @@ const Register = () => {
                 <div
                   className="
                     mb-5
-
                     flex
                     items-start
                     gap-3
-
                     rounded-xl
-
                     border
                     border-emerald-200
-
                     bg-emerald-50
-
                     px-4
                     py-3
-
                     text-sm
                     leading-5
                     text-emerald-700
-
                     dark:border-emerald-500/20
                     dark:bg-emerald-500/10
                     dark:text-emerald-400
@@ -706,10 +644,7 @@ const Register = () => {
                 >
                   <CheckCircle2
                     size={18}
-                    className="
-                      mt-0.5
-                      shrink-0
-                    "
+                    className="mt-0.5 shrink-0"
                   />
 
                   <span>{success}</span>
@@ -725,9 +660,7 @@ const Register = () => {
                 className="space-y-5"
               >
 
-                {/* =================================================
-                    FULL NAME
-                ================================================= */}
+                {/* FULL NAME */}
 
                 <div className="group/input">
 
@@ -736,12 +669,9 @@ const Register = () => {
                     className="
                       mb-2
                       block
-
                       text-sm
                       font-semibold
-
                       text-slate-700
-
                       dark:text-slate-300
                     "
                   >
@@ -754,19 +684,13 @@ const Register = () => {
                       size={18}
                       className="
                         pointer-events-none
-
                         absolute
                         left-3.5
                         top-1/2
-
                         -translate-y-1/2
-
                         text-slate-400
-
                         transition-colors
-
                         group-focus-within/input:text-indigo-500
-
                         dark:text-slate-500
                       "
                     />
@@ -780,43 +704,33 @@ const Register = () => {
                       onChange={handleChange}
                       autoComplete="name"
                       required
+                      disabled={isLoading}
                       className="
                         w-full
-
                         rounded-xl
-
                         border
-
+                        border-slate-200
+                        bg-slate-50
                         py-3.5
                         pl-11
                         pr-4
-
                         text-sm
-
-                        outline-none
-
-                        border-slate-200
-                        bg-slate-50
                         text-slate-900
-
+                        outline-none
                         placeholder:text-slate-400
-
                         transition-all
                         duration-300
-
                         hover:border-slate-300
-
                         focus:border-indigo-500
                         focus:bg-white
                         focus:ring-4
                         focus:ring-indigo-500/10
-
+                        disabled:cursor-not-allowed
+                        disabled:opacity-60
                         dark:border-slate-700
                         dark:bg-slate-800
                         dark:text-white
-
                         dark:placeholder:text-slate-500
-
                         dark:hover:border-slate-600
                         dark:focus:border-indigo-500
                         dark:focus:bg-slate-800
@@ -825,9 +739,7 @@ const Register = () => {
                   </div>
                 </div>
 
-                {/* =================================================
-                    EMAIL
-                ================================================= */}
+                {/* EMAIL */}
 
                 <div className="group/input">
 
@@ -836,12 +748,9 @@ const Register = () => {
                     className="
                       mb-2
                       block
-
                       text-sm
                       font-semibold
-
                       text-slate-700
-
                       dark:text-slate-300
                     "
                   >
@@ -854,19 +763,13 @@ const Register = () => {
                       size={18}
                       className="
                         pointer-events-none
-
                         absolute
                         left-3.5
                         top-1/2
-
                         -translate-y-1/2
-
                         text-slate-400
-
                         transition-colors
-
                         group-focus-within/input:text-indigo-500
-
                         dark:text-slate-500
                       "
                     />
@@ -880,43 +783,33 @@ const Register = () => {
                       onChange={handleChange}
                       autoComplete="email"
                       required
+                      disabled={isLoading}
                       className="
                         w-full
-
                         rounded-xl
-
                         border
-
+                        border-slate-200
+                        bg-slate-50
                         py-3.5
                         pl-11
                         pr-4
-
                         text-sm
-
-                        outline-none
-
-                        border-slate-200
-                        bg-slate-50
                         text-slate-900
-
+                        outline-none
                         placeholder:text-slate-400
-
                         transition-all
                         duration-300
-
                         hover:border-slate-300
-
                         focus:border-indigo-500
                         focus:bg-white
                         focus:ring-4
                         focus:ring-indigo-500/10
-
+                        disabled:cursor-not-allowed
+                        disabled:opacity-60
                         dark:border-slate-700
                         dark:bg-slate-800
                         dark:text-white
-
                         dark:placeholder:text-slate-500
-
                         dark:hover:border-slate-600
                         dark:focus:border-indigo-500
                         dark:focus:bg-slate-800
@@ -925,9 +818,7 @@ const Register = () => {
                   </div>
                 </div>
 
-                {/* =================================================
-                    PASSWORD
-                ================================================= */}
+                {/* PASSWORD */}
 
                 <div className="group/input">
 
@@ -944,9 +835,7 @@ const Register = () => {
                       className="
                         text-sm
                         font-semibold
-
                         text-slate-700
-
                         dark:text-slate-300
                       "
                     >
@@ -980,19 +869,13 @@ const Register = () => {
                       size={18}
                       className="
                         pointer-events-none
-
                         absolute
                         left-3.5
                         top-1/2
-
                         -translate-y-1/2
-
                         text-slate-400
-
                         transition-colors
-
                         group-focus-within/input:text-indigo-500
-
                         dark:text-slate-500
                       "
                     />
@@ -1010,43 +893,33 @@ const Register = () => {
                       onChange={handleChange}
                       autoComplete="new-password"
                       required
+                      disabled={isLoading}
                       className="
                         w-full
-
                         rounded-xl
-
                         border
-
+                        border-slate-200
+                        bg-slate-50
                         py-3.5
                         pl-11
                         pr-12
-
                         text-sm
-
-                        outline-none
-
-                        border-slate-200
-                        bg-slate-50
                         text-slate-900
-
+                        outline-none
                         placeholder:text-slate-400
-
                         transition-all
                         duration-300
-
                         hover:border-slate-300
-
                         focus:border-indigo-500
                         focus:bg-white
                         focus:ring-4
                         focus:ring-indigo-500/10
-
+                        disabled:cursor-not-allowed
+                        disabled:opacity-60
                         dark:border-slate-700
                         dark:bg-slate-800
                         dark:text-white
-
                         dark:placeholder:text-slate-500
-
                         dark:hover:border-slate-600
                         dark:focus:border-indigo-500
                         dark:focus:bg-slate-800
@@ -1060,24 +933,19 @@ const Register = () => {
                           (previous) => !previous
                         )
                       }
+                      disabled={isLoading}
                       className="
                         absolute
                         right-2.5
                         top-1/2
-
                         -translate-y-1/2
-
                         rounded-lg
-
                         p-2
-
                         text-slate-400
-
                         transition-all
-
                         hover:bg-indigo-50
                         hover:text-indigo-600
-
+                        disabled:cursor-not-allowed
                         dark:text-slate-500
                         dark:hover:bg-indigo-500/10
                         dark:hover:text-indigo-400
@@ -1096,17 +964,12 @@ const Register = () => {
                     </button>
                   </div>
 
-                  {/* Strength bar */}
+                  {/* PASSWORD STRENGTH */}
 
                   {form.password && (
                     <div className="mt-3">
 
-                      <div
-                        className="
-                          flex
-                          gap-1.5
-                        "
-                      >
+                      <div className="flex gap-1.5">
                         {[1, 2, 3, 4, 5].map(
                           (item) => (
                             <div
@@ -1117,7 +980,6 @@ const Register = () => {
                                 rounded-full
                                 transition-all
                                 duration-300
-
                                 ${
                                   item <=
                                   passwordStrength.score
@@ -1152,9 +1014,7 @@ const Register = () => {
                   )}
                 </div>
 
-                {/* =================================================
-                    CONFIRM PASSWORD
-                ================================================= */}
+                {/* CONFIRM PASSWORD */}
 
                 <div className="group/input">
 
@@ -1163,12 +1023,9 @@ const Register = () => {
                     className="
                       mb-2
                       block
-
                       text-sm
                       font-semibold
-
                       text-slate-700
-
                       dark:text-slate-300
                     "
                   >
@@ -1181,19 +1038,13 @@ const Register = () => {
                       size={18}
                       className="
                         pointer-events-none
-
                         absolute
                         left-3.5
                         top-1/2
-
                         -translate-y-1/2
-
                         text-slate-400
-
                         transition-colors
-
                         group-focus-within/input:text-indigo-500
-
                         dark:text-slate-500
                       "
                     />
@@ -1211,34 +1062,26 @@ const Register = () => {
                       onChange={handleChange}
                       autoComplete="new-password"
                       required
+                      disabled={isLoading}
                       className={`
                         w-full
-
                         rounded-xl
-
                         border
-
+                        bg-slate-50
                         py-3.5
                         pl-11
                         pr-12
-
                         text-sm
-
-                        outline-none
-
-                        bg-slate-50
                         text-slate-900
-
+                        outline-none
                         placeholder:text-slate-400
-
                         transition-all
                         duration-300
-
                         dark:bg-slate-800
                         dark:text-white
-
                         dark:placeholder:text-slate-500
-
+                        disabled:cursor-not-allowed
+                        disabled:opacity-60
                         ${
                           form.confirmPassword &&
                           form.password !==
@@ -1248,18 +1091,15 @@ const Register = () => {
                               focus:border-red-500
                               focus:ring-4
                               focus:ring-red-500/10
-
                               dark:border-red-500/40
                             `
                             : `
                               border-slate-200
                               hover:border-slate-300
-
                               focus:border-indigo-500
                               focus:bg-white
                               focus:ring-4
                               focus:ring-indigo-500/10
-
                               dark:border-slate-700
                               dark:hover:border-slate-600
                               dark:focus:border-indigo-500
@@ -1275,24 +1115,19 @@ const Register = () => {
                           (previous) => !previous
                         )
                       }
+                      disabled={isLoading}
                       className="
                         absolute
                         right-2.5
                         top-1/2
-
                         -translate-y-1/2
-
                         rounded-lg
-
                         p-2
-
                         text-slate-400
-
                         transition-all
-
                         hover:bg-indigo-50
                         hover:text-indigo-600
-
+                        disabled:cursor-not-allowed
                         dark:text-slate-500
                         dark:hover:bg-indigo-500/10
                         dark:hover:text-indigo-400
@@ -1311,33 +1146,22 @@ const Register = () => {
                     </button>
                   </div>
 
-                  {/* =================================================
-                      PASSWORD MATCH
-                  ================================================= */}
+                  {/* PASSWORD MATCH */}
 
                   {form.confirmPassword && (
                     <div
                       className={`
                         mt-2
-
                         flex
                         items-center
                         gap-1.5
-
                         text-xs
                         font-medium
-
                         ${
                           form.password ===
                           form.confirmPassword
-                            ? `
-                              text-emerald-600
-                              dark:text-emerald-400
-                            `
-                            : `
-                              text-red-600
-                              dark:text-red-400
-                            `
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : "text-red-600 dark:text-red-400"
                         }
                       `}
                     >
@@ -1357,26 +1181,19 @@ const Register = () => {
                   )}
                 </div>
 
-                {/* =================================================
-                    TERMS
-                ================================================= */}
+                {/* SECURITY MESSAGE */}
 
                 <div
                   className="
                     flex
                     items-start
                     gap-3
-
                     rounded-xl
-
                     border
                     border-slate-200
-
                     bg-slate-50
-
                     px-4
                     py-3
-
                     dark:border-slate-800
                     dark:bg-slate-800/50
                   "
@@ -1386,7 +1203,6 @@ const Register = () => {
                     className="
                       mt-0.5
                       shrink-0
-
                       text-emerald-500
                     "
                   />
@@ -1395,9 +1211,7 @@ const Register = () => {
                     className="
                       text-xs
                       leading-5
-
                       text-slate-500
-
                       dark:text-slate-400
                     "
                   >
@@ -1407,74 +1221,53 @@ const Register = () => {
                   </p>
                 </div>
 
-                {/* =================================================
-                    CREATE ACCOUNT
-                ================================================= */}
+                {/* CREATE ACCOUNT */}
 
                 <button
                   type="submit"
                   disabled={isLoading}
                   className="
                     group
-
                     relative
-
                     flex
                     w-full
-
                     items-center
                     justify-center
                     gap-2
-
                     overflow-hidden
-
                     rounded-xl
-
                     bg-indigo-600
-
                     py-3.5
-
                     text-sm
                     font-semibold
                     text-white
-
                     shadow-lg
                     shadow-indigo-500/20
-
                     transition-all
                     duration-300
-
                     hover:-translate-y-0.5
                     hover:bg-indigo-700
                     hover:shadow-xl
                     hover:shadow-indigo-500/25
-
                     active:translate-y-0
                     active:scale-[0.98]
-
                     disabled:cursor-not-allowed
                     disabled:opacity-70
                     disabled:hover:translate-y-0
                   "
                 >
-                  {/* Button shine */}
-
                   <span
                     className="
                       pointer-events-none
                       absolute
                       inset-0
-
                       -translate-x-full
-
                       bg-gradient-to-r
                       from-transparent
                       via-white/15
                       to-transparent
-
                       transition-transform
                       duration-700
-
                       group-hover:translate-x-full
                     "
                   />
@@ -1483,7 +1276,6 @@ const Register = () => {
                     className="
                       relative
                       z-10
-
                       flex
                       items-center
                       justify-center
@@ -1496,11 +1288,8 @@ const Register = () => {
                           className="
                             h-4
                             w-4
-
                             animate-spin
-
                             rounded-full
-
                             border-2
                             border-white/30
                             border-t-white
@@ -1516,7 +1305,6 @@ const Register = () => {
                           className="
                             transition-transform
                             duration-300
-
                             group-hover:scale-110
                           "
                         />
@@ -1528,7 +1316,6 @@ const Register = () => {
                           className="
                             transition-transform
                             duration-300
-
                             group-hover:translate-x-1
                           "
                         />
@@ -1538,30 +1325,22 @@ const Register = () => {
                 </button>
               </form>
 
-              {/* =================================================
-                  LOGIN
-              ================================================= */}
+              {/* LOGIN */}
 
               <div
                 className="
                   mt-7
-
                   border-t
                   border-slate-200
-
                   pt-6
-
                   text-center
-
                   dark:border-slate-800
                 "
               >
                 <p
                   className="
                     text-sm
-
                     text-slate-500
-
                     dark:text-slate-400
                   "
                 >
@@ -1571,16 +1350,12 @@ const Register = () => {
                     to="/login"
                     className="
                       font-semibold
-
                       text-indigo-600
-
                       transition-all
                       duration-200
-
                       hover:text-indigo-700
                       hover:underline
                       hover:underline-offset-4
-
                       dark:text-indigo-400
                       dark:hover:text-indigo-300
                     "
@@ -1592,28 +1367,20 @@ const Register = () => {
             </div>
           </section>
 
-          {/* =================================================
-              SECURITY
-          ================================================= */}
+          {/* SECURITY */}
 
           <div
             className="
               mt-5
-
               flex
               items-center
               justify-center
               gap-2
-
               px-4
-
               text-center
-
               text-xs
               font-medium
-
               text-slate-400
-
               dark:text-slate-500
             "
           >
@@ -1625,20 +1392,14 @@ const Register = () => {
             Secure account creation with SignAI
           </div>
 
-          {/* =================================================
-              FOOTER
-          ================================================= */}
+          {/* FOOTER */}
 
           <p
             className="
               mt-3
-
               text-center
-
               text-[11px]
-
               text-slate-400
-
               dark:text-slate-600
             "
           >

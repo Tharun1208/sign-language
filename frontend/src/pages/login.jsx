@@ -54,13 +54,177 @@ const Login = () => {
   };
 
   // =========================================================
+  // SAVE USER SESSION
+  // =========================================================
+
+  const saveUserSession = (data) => {
+    localStorage.setItem("isLoggedIn", "true");
+
+    if (data?.token) {
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("authToken", data.token);
+    }
+
+    if (data?.user) {
+      localStorage.setItem(
+        "signai-user",
+        JSON.stringify(data.user)
+      );
+
+      localStorage.setItem(
+        "user",
+        JSON.stringify(data.user)
+      );
+
+      const profileImage =
+        data.user.picture ||
+        data.user.profileImage ||
+        data.user.image ||
+        "";
+
+      if (profileImage) {
+        localStorage.setItem(
+          "signai-profile-image",
+          profileImage
+        );
+      }
+    }
+  };
+
+  // =========================================================
+  // NORMAL EMAIL/PASSWORD LOGIN
+  // =========================================================
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+
+    setError("");
+    setSuccess("");
+
+    const cleanEmail = email.trim();
+    const cleanPassword = password;
+
+    // -------------------------------------------------------
+    // VALIDATION
+    // -------------------------------------------------------
+
+    if (!cleanEmail || !cleanPassword) {
+      setError(
+        "Please enter your email and password."
+      );
+      return;
+    }
+
+    if (!cleanEmail.includes("@")) {
+      setError(
+        "Please enter a valid email address."
+      );
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      // -----------------------------------------------------
+      // CALL BACKEND LOGIN API
+      // -----------------------------------------------------
+
+      const response = await fetch(
+        `${API_URL}/api/auth/login`,
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+          },
+
+          body: JSON.stringify({
+            email: cleanEmail,
+            password: cleanPassword,
+          }),
+        }
+      );
+
+      // -----------------------------------------------------
+      // READ RESPONSE SAFELY
+      // -----------------------------------------------------
+
+      let data = {};
+
+      try {
+        data = await response.json();
+      } catch {
+        data = {};
+      }
+
+      // -----------------------------------------------------
+      // LOGIN FAILED
+      // -----------------------------------------------------
+
+      if (!response.ok) {
+        throw new Error(
+          data.message ||
+            data.error ||
+            "Invalid email or password."
+        );
+      }
+
+      // -----------------------------------------------------
+      // CHECK TOKEN
+      // -----------------------------------------------------
+
+      if (!data.token) {
+        throw new Error(
+          "Login successful, but authentication token was not received."
+        );
+      }
+
+      // -----------------------------------------------------
+      // SAVE SESSION
+      // -----------------------------------------------------
+
+      saveUserSession(data);
+
+      setSuccess(
+        data.message ||
+          "Login successful."
+      );
+
+      // -----------------------------------------------------
+      // REDIRECT
+      // -----------------------------------------------------
+
+      setTimeout(() => {
+        redirectAfterLogin();
+      }, 500);
+
+    } catch (err) {
+      console.error(
+        "Login Error:",
+        err
+      );
+
+      setError(
+        err?.message ||
+          "Unable to login. Please try again."
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // =========================================================
   // GOOGLE RESPONSE
   // =========================================================
 
   const handleGoogleResponse = async (response) => {
     if (!response?.credential) {
       setGoogleLoading(false);
-      setError("Google authentication failed.");
+
+      setError(
+        "Google authentication failed."
+      );
+
       return;
     }
 
@@ -73,85 +237,54 @@ const Login = () => {
         `${API_URL}/api/auth/google`,
         {
           method: "POST",
+
           headers: {
             "Content-Type": "application/json",
           },
+
           body: JSON.stringify({
             credential: response.credential,
           }),
         }
       );
 
-      const data = await result.json();
+      let data = {};
+
+      try {
+        data = await result.json();
+      } catch {
+        data = {};
+      }
 
       if (!result.ok) {
         throw new Error(
           data.message ||
+            data.error ||
             "Google login failed."
         );
       }
 
-      // =====================================================
-      // LOGIN STATUS
-      // =====================================================
-
-      localStorage.setItem(
-        "isLoggedIn",
-        "true"
-      );
-
-      // =====================================================
-      // TOKEN
-      // =====================================================
-
-      if (data.token) {
-        localStorage.setItem(
-          "token",
-          data.token
-        );
-
-        localStorage.setItem(
-          "authToken",
-          data.token
+      if (!data.token) {
+        throw new Error(
+          "Google login succeeded, but authentication token was not received."
         );
       }
 
-      // =====================================================
-      // USER
-      // =====================================================
+      // -----------------------------------------------------
+      // SAVE GOOGLE SESSION
+      // -----------------------------------------------------
 
-      if (data.user) {
-        localStorage.setItem(
-          "signai-user",
-          JSON.stringify(data.user)
-        );
-
-        localStorage.setItem(
-          "user",
-          JSON.stringify(data.user)
-        );
-
-        const profileImage =
-          data.user.picture ||
-          data.user.profileImage ||
-          data.user.image ||
-          "";
-
-        if (profileImage) {
-          localStorage.setItem(
-            "signai-profile-image",
-            profileImage
-          );
-        }
-      }
+      saveUserSession(data);
 
       setSuccess(
-        "Google login successful."
+        data.message ||
+          "Google login successful."
       );
 
       setTimeout(() => {
         redirectAfterLogin();
       }, 500);
+
     } catch (err) {
       console.error(
         "Google Login Error:",
@@ -177,10 +310,6 @@ const Login = () => {
         "VITE_GOOGLE_CLIENT_ID is missing."
       );
 
-      setError(
-        "Google Sign-In is not configured."
-      );
-
       return;
     }
 
@@ -197,8 +326,11 @@ const Login = () => {
       try {
         window.google.accounts.id.initialize({
           client_id: GOOGLE_CLIENT_ID,
+
           callback: handleGoogleResponse,
+
           auto_select: false,
+
           cancel_on_tap_outside: true,
         });
 
@@ -215,10 +347,11 @@ const Login = () => {
             logo_alignment: "left",
           }
         );
-      } catch (error) {
+
+      } catch (err) {
         console.error(
           "Google initialization error:",
-          error
+          err
         );
 
         setError(
@@ -275,9 +408,7 @@ const Login = () => {
       );
     };
 
-    document.head.appendChild(
-      script
-    );
+    document.head.appendChild(script);
 
     return () => {
       script.onload = null;
@@ -285,7 +416,7 @@ const Login = () => {
   }, []);
 
   // =========================================================
-  // GOOGLE BUTTON CLICK
+  // GOOGLE BUTTON
   // =========================================================
 
   const handleGoogleButtonClick = () => {
@@ -307,7 +438,6 @@ const Login = () => {
       return;
     }
 
-    // Google renders an iframe/button inside this container.
     const googleButton =
       container.querySelector(
         '[role="button"]'
@@ -318,134 +448,14 @@ const Login = () => {
       return;
     }
 
-    // Sometimes Google needs a little more time.
     setError(
       "Google Sign-In is still loading. Please try again."
     );
   };
 
   // =========================================================
-  // NORMAL LOGIN
+  // UI
   // =========================================================
-
-  const handleLogin = (e) => {
-    e.preventDefault();
-
-    setError("");
-    setSuccess("");
-
-    const cleanEmail =
-      email.trim();
-
-    const cleanPassword =
-      password.trim();
-
-    if (
-      !cleanEmail ||
-      !cleanPassword
-    ) {
-      setError(
-        "Please enter your email and password."
-      );
-
-      return;
-    }
-
-    setIsLoading(true);
-
-    // =======================================================
-    // DEMO LOGIN
-    // =======================================================
-
-    setTimeout(() => {
-      localStorage.setItem(
-        "isLoggedIn",
-        "true"
-      );
-
-      // =====================================================
-      // EXISTING USER
-      // =====================================================
-
-      const existingUser =
-        localStorage.getItem(
-          "signai-user"
-        );
-
-      let user = null;
-
-      if (existingUser) {
-        try {
-          user =
-            JSON.parse(
-              existingUser
-            );
-
-          user.email =
-            cleanEmail;
-        } catch {
-          user = null;
-        }
-      }
-
-      // =====================================================
-      // CREATE USER
-      // =====================================================
-
-      if (!user) {
-        const nameFromEmail =
-          cleanEmail
-            .split("@")[0]
-            .replace(
-              /[._-]/g,
-              " "
-            )
-            .replace(
-              /\b\w/g,
-              (letter) =>
-                letter.toUpperCase()
-            );
-
-        user = {
-          name:
-            nameFromEmail ||
-            "SignAI User",
-
-          email:
-            cleanEmail,
-
-          phone: "",
-          age: "",
-          university: "",
-          picture: "",
-        };
-      }
-
-      // =====================================================
-      // SAVE USER
-      // =====================================================
-
-      localStorage.setItem(
-        "signai-user",
-        JSON.stringify(user)
-      );
-
-      localStorage.setItem(
-        "user",
-        JSON.stringify(user)
-      );
-
-      setSuccess(
-        "Login successful."
-      );
-
-      setTimeout(() => {
-        redirectAfterLogin();
-      }, 500);
-
-      setIsLoading(false);
-    }, 700);
-  };
 
   return (
     <div
@@ -461,11 +471,10 @@ const Login = () => {
     >
 
       {/* =====================================================
-          CHROME / EDGE AUTOFILL FIX
+          AUTOFILL FIX
       ===================================================== */}
 
       <style>{`
-        /* Light mode autofill */
         input:-webkit-autofill,
         input:-webkit-autofill:hover,
         input:-webkit-autofill:focus,
@@ -478,7 +487,6 @@ const Login = () => {
           caret-color: #0f172a !important;
         }
 
-        /* Dark mode autofill */
         .dark input:-webkit-autofill,
         .dark input:-webkit-autofill:hover,
         .dark input:-webkit-autofill:focus,
@@ -491,24 +499,15 @@ const Login = () => {
           caret-color: #ffffff !important;
         }
 
-        /* Dark mode normal input */
         .dark input {
           color: #ffffff;
           caret-color: #ffffff;
         }
 
-        /* Dark mode placeholder */
         .dark input::placeholder {
           color: #64748b;
         }
 
-        /* Password input */
-        .dark input[type="password"],
-        .dark input[type="text"] {
-          color: #ffffff;
-        }
-
-        /* Keep autofill transition from flashing white */
         input:-webkit-autofill {
           transition:
             background-color 9999s ease-in-out 0s;
@@ -597,7 +596,7 @@ const Login = () => {
             "
           />
 
-          <span className="hidden xs:inline sm:inline">
+          <span>
             Back to Home
           </span>
         </Link>
@@ -622,12 +621,7 @@ const Login = () => {
           lg:px-8
         "
       >
-        <div
-          className="
-            w-full
-            max-w-md
-          "
-        >
+        <div className="w-full max-w-md">
 
           {/* =================================================
               BRAND
@@ -732,8 +726,6 @@ const Login = () => {
             "
           >
 
-            {/* CARD GLOW */}
-
             <div
               className="
                 pointer-events-none
@@ -834,9 +826,7 @@ const Login = () => {
                     className="mt-0.5 shrink-0"
                   />
 
-                  <span>
-                    {error}
-                  </span>
+                  <span>{error}</span>
                 </div>
               )}
 
@@ -864,16 +854,14 @@ const Login = () => {
                     dark:text-emerald-400
                   "
                 >
-                  <CheckCircle2
-                    size={18}
-                  />
+                  <CheckCircle2 size={18} />
 
                   {success}
                 </div>
               )}
 
               {/* =================================================
-                  EMAIL LOGIN
+                  LOGIN FORM
               ================================================= */}
 
               <form
@@ -922,10 +910,7 @@ const Login = () => {
                       autoComplete="email"
                       value={email}
                       onChange={(e) => {
-                        setEmail(
-                          e.target.value
-                        );
-
+                        setEmail(e.target.value);
                         setError("");
                         setSuccess("");
                       }}
@@ -988,11 +973,11 @@ const Login = () => {
 
                     <button
                       type="button"
-                      onClick={() =>
+                      onClick={() => {
                         setError(
                           "Password recovery is not configured yet."
-                        )
-                      }
+                        );
+                      }}
                       className="
                         text-xs
                         font-semibold
@@ -1072,8 +1057,7 @@ const Login = () => {
                       type="button"
                       onClick={() =>
                         setShowPassword(
-                          (value) =>
-                            !value
+                          (value) => !value
                         )
                       }
                       className="
@@ -1098,13 +1082,9 @@ const Login = () => {
                       }
                     >
                       {showPassword ? (
-                        <EyeOff
-                          size={18}
-                        />
+                        <EyeOff size={18} />
                       ) : (
-                        <Eye
-                          size={18}
-                        />
+                        <Eye size={18} />
                       )}
                     </button>
 
@@ -1113,7 +1093,7 @@ const Login = () => {
                 </div>
 
                 {/* =================================================
-                    SIGN IN BUTTON
+                    SIGN IN
                 ================================================= */}
 
                 <button
@@ -1185,7 +1165,6 @@ const Login = () => {
                   gap-3
                 "
               >
-
                 <div
                   className="
                     h-px
@@ -1216,11 +1195,10 @@ const Login = () => {
                     dark:bg-slate-800
                   "
                 />
-
               </div>
 
               {/* =================================================
-                  GOOGLE BUTTON
+                  GOOGLE
               ================================================= */}
 
               <button
@@ -1287,8 +1265,6 @@ const Login = () => {
                   </>
                 ) : (
                   <>
-                    {/* GOOGLE ICON */}
-
                     <svg
                       width="20"
                       height="20"
@@ -1325,7 +1301,7 @@ const Login = () => {
               </button>
 
               {/* =================================================
-                  HIDDEN GOOGLE IDENTITY BUTTON
+                  GOOGLE GIS CONTAINER
               ================================================= */}
 
               <div

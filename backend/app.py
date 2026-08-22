@@ -2,6 +2,7 @@ import os
 import time
 import secrets
 import gc
+import sqlite3
 
 import cv2
 import joblib
@@ -11,6 +12,11 @@ import mediapipe as mp
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
+
+from werkzeug.security import (
+    generate_password_hash,
+    check_password_hash
+)
 
 # ============================================================
 # GOOGLE AUTHENTICATION
@@ -71,11 +77,9 @@ GOOGLE_CLIENT_ID = os.getenv(
 # ============================================================
 # APPLICATION AUTH TOKENS
 #
-# Development/simple production setup.
-#
 # NOTE:
-# Render restarts can clear this dictionary.
-# For permanent authentication use JWT/database/Redis.
+# These tokens are stored in memory.
+# Render restarts will clear active sessions.
 # ============================================================
 
 AUTH_TOKENS = {}
@@ -89,11 +93,90 @@ BASE_DIR = os.path.dirname(
     os.path.abspath(__file__)
 )
 
+
 MODEL_PATH = os.path.join(
     BASE_DIR,
     "models",
     "sign_model.pkl"
 )
+
+
+# ============================================================
+# AUTHENTICATION DATABASE
+# ============================================================
+
+AUTH_DB = os.path.join(
+    BASE_DIR,
+    "auth.db"
+)
+
+
+def get_auth_db():
+    """
+    Open the authentication SQLite database.
+    """
+
+    conn = sqlite3.connect(
+        AUTH_DB
+    )
+
+    conn.row_factory = sqlite3.Row
+
+    return conn
+
+
+def init_auth_db():
+    """
+    Create the users table if it does not already exist.
+    """
+
+    try:
+
+        conn = get_auth_db()
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                full_name TEXT NOT NULL,
+                email TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        conn.commit()
+
+        conn.close()
+
+        print()
+        print("=" * 70)
+        print("AUTHENTICATION DATABASE")
+        print("=" * 70)
+        print(
+            f"Database: {AUTH_DB}"
+        )
+        print(
+            "Status:   Ready"
+        )
+        print("=" * 70)
+        print()
+
+    except Exception as error:
+
+        print()
+        print("=" * 70)
+        print("AUTHENTICATION DATABASE ERROR")
+        print("=" * 70)
+        print(
+            "Error:",
+            error
+        )
+        print("=" * 70)
+        print()
+
+
+# Initialize authentication database
+init_auth_db()
 
 
 # ============================================================
@@ -135,10 +218,6 @@ hands = None
 def get_hands():
     """
     Lazily initialize MediaPipe Hands.
-
-    Lazy initialization reduces startup memory pressure
-    and avoids creating the MediaPipe pipeline before it
-    is actually required.
     """
 
     global hands
@@ -158,8 +237,14 @@ def get_hands():
             min_tracking_confidence=0.5
         )
 
-        print("MediaPipe Hands initialized.")
-        print("=" * 70)
+        print(
+            "MediaPipe Hands initialized."
+        )
+
+        print(
+            "=" * 70
+        )
+
         print()
 
     return hands
@@ -169,7 +254,10 @@ def get_hands():
 # SAFE NUMBER
 # ============================================================
 
-def safe_number(value, default=None):
+def safe_number(
+    value,
+    default=None
+):
     """
     Convert a value to float safely.
     """
@@ -178,12 +266,16 @@ def safe_number(value, default=None):
         return default
 
     try:
-        return float(value)
+
+        return float(
+            value
+        )
 
     except (
         TypeError,
         ValueError
     ):
+
         return default
 
 
@@ -191,17 +283,20 @@ def safe_number(value, default=None):
 # FORMAT ACCURACY
 # ============================================================
 
-def format_accuracy(value):
+def format_accuracy(
+    value
+):
     """
     Normalize accuracy values.
 
     Example:
-
         0.9363 -> 93.63
         93.63  -> 93.63
     """
 
-    value = safe_number(value)
+    value = safe_number(
+        value
+    )
 
     if value is None:
         return None
@@ -210,7 +305,13 @@ def format_accuracy(value):
         value *= 100
 
     return round(
-        min(100, max(0, value)),
+        min(
+            100,
+            max(
+                0,
+                value
+            )
+        ),
         2
     )
 
@@ -219,12 +320,16 @@ def format_accuracy(value):
 # CREATE APPLICATION AUTH TOKEN
 # ============================================================
 
-def create_auth_token(user):
+def create_auth_token(
+    user
+):
     """
     Create a random application authentication token.
     """
 
-    token = secrets.token_urlsafe(48)
+    token = secrets.token_urlsafe(
+        48
+    )
 
     AUTH_TOKENS[token] = {
         "user": user,
@@ -232,6 +337,621 @@ def create_auth_token(user):
     }
 
     return token
+
+
+# ============================================================
+# EMAIL / PASSWORD REGISTER
+#
+# POST /api/auth/register
+#
+# Body:
+#
+# {
+#     "fullName": "John Doe",
+#     "email": "john@gmail.com",
+#     "password": "123456",
+#     "confirmPassword": "123456"
+# }
+# ============================================================
+
+@app.route(
+    "/api/auth/register",
+    methods=["POST"]
+)
+def register():
+
+    try:
+
+        data = request.get_json(
+            silent=True
+        )
+
+        if not data:
+
+            return jsonify({
+
+                "success":
+                    False,
+
+                "message":
+                    "Request body is missing."
+
+            }), 400
+
+
+        # ====================================================
+        # GET DATA
+        # ====================================================
+
+        full_name = str(
+            data.get(
+                "fullName",
+                ""
+            )
+        ).strip()
+
+
+        email = str(
+            data.get(
+                "email",
+                ""
+            )
+        ).strip().lower()
+
+
+        password = str(
+            data.get(
+                "password",
+                ""
+            )
+        )
+
+
+        confirm_password = str(
+            data.get(
+                "confirmPassword",
+                ""
+            )
+        )
+
+
+        # ====================================================
+        # VALIDATION
+        # ====================================================
+
+        if not full_name:
+
+            return jsonify({
+
+                "success":
+                    False,
+
+                "message":
+                    "Please enter your full name."
+
+            }), 400
+
+
+        if not email:
+
+            return jsonify({
+
+                "success":
+                    False,
+
+                "message":
+                    "Please enter your email address."
+
+            }), 400
+
+
+        if "@" not in email or "." not in email:
+
+            return jsonify({
+
+                "success":
+                    False,
+
+                "message":
+                    "Please enter a valid email address."
+
+            }), 400
+
+
+        if len(password) < 6:
+
+            return jsonify({
+
+                "success":
+                    False,
+
+                "message":
+                    "Password must contain at least 6 characters."
+
+            }), 400
+
+
+        if password != confirm_password:
+
+            return jsonify({
+
+                "success":
+                    False,
+
+                "message":
+                    "Passwords do not match."
+
+            }), 400
+
+
+        # ====================================================
+        # OPEN DATABASE
+        # ====================================================
+
+        conn = get_auth_db()
+
+
+        # ====================================================
+        # CHECK EXISTING USER
+        # ====================================================
+
+        existing_user = conn.execute(
+            """
+            SELECT id
+            FROM users
+            WHERE email = ?
+            """,
+            (
+                email,
+            )
+        ).fetchone()
+
+
+        if existing_user:
+
+            conn.close()
+
+            return jsonify({
+
+                "success":
+                    False,
+
+                "message":
+                    "An account with this email already exists."
+
+            }), 409
+
+
+        # ====================================================
+        # HASH PASSWORD
+        # ====================================================
+
+        password_hash = generate_password_hash(
+            password
+        )
+
+
+        # ====================================================
+        # INSERT USER
+        # ====================================================
+
+        cursor = conn.execute(
+            """
+            INSERT INTO users (
+                full_name,
+                email,
+                password_hash
+            )
+            VALUES (?, ?, ?)
+            """,
+            (
+                full_name,
+                email,
+                password_hash
+            )
+        )
+
+
+        conn.commit()
+
+
+        user_id = cursor.lastrowid
+
+
+        conn.close()
+
+
+        # ====================================================
+        # LOG
+        # ====================================================
+
+        print()
+        print("=" * 70)
+        print("NEW USER REGISTERED")
+        print("=" * 70)
+
+        print(
+            f"User ID:       {user_id}"
+        )
+
+        print(
+            f"Name:          {full_name}"
+        )
+
+        print(
+            f"Email:         {email}"
+        )
+
+        print(
+            "Provider:      email"
+        )
+
+        print("=" * 70)
+        print()
+
+
+        # ====================================================
+        # RESPONSE
+        # ====================================================
+
+        return jsonify({
+
+            "success":
+                True,
+
+            "message":
+                "Account created successfully.",
+
+            "user": {
+
+                "id":
+                    str(user_id),
+
+                "name":
+                    full_name,
+
+                "email":
+                    email,
+
+                "phone":
+                    "",
+
+                "age":
+                    "",
+
+                "university":
+                    "",
+
+                "picture":
+                    "",
+
+                "profileImage":
+                    "",
+
+                "image":
+                    "",
+
+                "emailVerified":
+                    True,
+
+                "provider":
+                    "email"
+
+            }
+
+        }), 201
+
+
+    except sqlite3.IntegrityError:
+
+        return jsonify({
+
+            "success":
+                False,
+
+            "message":
+                "An account with this email already exists."
+
+        }), 409
+
+
+    except Exception as error:
+
+        print()
+        print(
+            "Registration Error:",
+            error
+        )
+        print()
+
+        return jsonify({
+
+            "success":
+                False,
+
+            "message":
+                "Registration failed.",
+
+            "error":
+                str(error)
+
+        }), 500
+
+
+# ============================================================
+# EMAIL / PASSWORD LOGIN
+#
+# POST /api/auth/login
+#
+# Body:
+#
+# {
+#     "email": "john@gmail.com",
+#     "password": "123456"
+# }
+# ============================================================
+
+@app.route(
+    "/api/auth/login",
+    methods=["POST"]
+)
+def email_login():
+
+    try:
+
+        data = request.get_json(
+            silent=True
+        )
+
+        if not data:
+
+            return jsonify({
+
+                "success":
+                    False,
+
+                "message":
+                    "Request body is missing."
+
+            }), 400
+
+
+        # ====================================================
+        # GET DATA
+        # ====================================================
+
+        email = str(
+            data.get(
+                "email",
+                ""
+            )
+        ).strip().lower()
+
+
+        password = str(
+            data.get(
+                "password",
+                ""
+            )
+        )
+
+
+        # ====================================================
+        # VALIDATION
+        # ====================================================
+
+        if not email:
+
+            return jsonify({
+
+                "success":
+                    False,
+
+                "message":
+                    "Please enter your email."
+
+            }), 400
+
+
+        if not password:
+
+            return jsonify({
+
+                "success":
+                    False,
+
+                "message":
+                    "Please enter your password."
+
+            }), 400
+
+
+        # ====================================================
+        # FIND USER
+        # ====================================================
+
+        conn = get_auth_db()
+
+
+        user = conn.execute(
+            """
+            SELECT
+                id,
+                full_name,
+                email,
+                password_hash
+            FROM users
+            WHERE email = ?
+            """,
+            (
+                email,
+            )
+        ).fetchone()
+
+
+        conn.close()
+
+
+        # ====================================================
+        # USER NOT FOUND
+        # ====================================================
+
+        if user is None:
+
+            return jsonify({
+
+                "success":
+                    False,
+
+                "message":
+                    "Invalid email or password."
+
+            }), 401
+
+
+        # ====================================================
+        # CHECK PASSWORD
+        # ====================================================
+
+        password_valid = check_password_hash(
+            user["password_hash"],
+            password
+        )
+
+
+        if not password_valid:
+
+            return jsonify({
+
+                "success":
+                    False,
+
+                "message":
+                    "Invalid email or password."
+
+            }), 401
+
+
+        # ====================================================
+        # USER OBJECT
+        # ====================================================
+
+        user_data = {
+
+            "id":
+                str(
+                    user["id"]
+                ),
+
+            "name":
+                user["full_name"],
+
+            "email":
+                user["email"],
+
+            "phone":
+                "",
+
+            "age":
+                "",
+
+            "university":
+                "",
+
+            "picture":
+                "",
+
+            "profileImage":
+                "",
+
+            "image":
+                "",
+
+            "emailVerified":
+                True,
+
+            "provider":
+                "email"
+
+        }
+
+
+        # ====================================================
+        # CREATE TOKEN
+        # ====================================================
+
+        app_token = create_auth_token(
+            user_data
+        )
+
+
+        # ====================================================
+        # LOG
+        # ====================================================
+
+        print()
+        print("=" * 70)
+        print("EMAIL LOGIN")
+        print("=" * 70)
+
+        print(
+            f"Name:          {user['full_name']}"
+        )
+
+        print(
+            f"Email:         {user['email']}"
+        )
+
+        print(
+            "Authentication: Email / Password"
+        )
+
+        print("=" * 70)
+        print()
+
+
+        # ====================================================
+        # RESPONSE
+        # ====================================================
+
+        return jsonify({
+
+            "success":
+                True,
+
+            "message":
+                "Login successful.",
+
+            "token":
+                app_token,
+
+            "user":
+                user_data
+
+        }), 200
+
+
+    except Exception as error:
+
+        print()
+        print(
+            "Email Login Error:",
+            error
+        )
+        print()
+
+        return jsonify({
+
+            "success":
+                False,
+
+            "message":
+                "Login failed.",
+
+            "error":
+                str(error)
+
+        }), 500
 
 
 # ============================================================
@@ -262,7 +982,8 @@ def google_login():
 
             return jsonify({
 
-                "success": False,
+                "success":
+                    False,
 
                 "message":
                     "Google authentication is not configured on the server."
@@ -274,11 +995,13 @@ def google_login():
             silent=True
         )
 
+
         if not data:
 
             return jsonify({
 
-                "success": False,
+                "success":
+                    False,
 
                 "message":
                     "Request body is missing."
@@ -295,7 +1018,8 @@ def google_login():
 
             return jsonify({
 
-                "success": False,
+                "success":
+                    False,
 
                 "message":
                     "Google credential is required."
@@ -324,7 +1048,8 @@ def google_login():
 
             return jsonify({
 
-                "success": False,
+                "success":
+                    False,
 
                 "message":
                     "Invalid or expired Google credential."
@@ -340,6 +1065,7 @@ def google_login():
             "iss"
         )
 
+
         if issuer not in [
             "accounts.google.com",
             "https://accounts.google.com"
@@ -347,7 +1073,8 @@ def google_login():
 
             return jsonify({
 
-                "success": False,
+                "success":
+                    False,
 
                 "message":
                     "Invalid Google token issuer."
@@ -397,7 +1124,8 @@ def google_login():
 
             return jsonify({
 
-                "success": False,
+                "success":
+                    False,
 
                 "message":
                     "Google account ID is missing."
@@ -409,7 +1137,8 @@ def google_login():
 
             return jsonify({
 
-                "success": False,
+                "success":
+                    False,
 
                 "message":
                     "Google account email is missing."
@@ -421,7 +1150,8 @@ def google_login():
 
             return jsonify({
 
-                "success": False,
+                "success":
+                    False,
 
                 "message":
                     "Your Google email address is not verified."
@@ -505,6 +1235,10 @@ def google_login():
         )
 
 
+        # ====================================================
+        # LOG
+        # ====================================================
+
         print()
         print("=" * 70)
         print("GOOGLE LOGIN")
@@ -536,7 +1270,8 @@ def google_login():
 
         return jsonify({
 
-            "success": True,
+            "success":
+                True,
 
             "message":
                 "Google login successful.",
@@ -559,7 +1294,8 @@ def google_login():
 
         return jsonify({
 
-            "success": False,
+            "success":
+                False,
 
             "message":
                 "Google login failed.",
@@ -594,7 +1330,8 @@ def get_current_user():
 
         return jsonify({
 
-            "success": False,
+            "success":
+                False,
 
             "message":
                 "Authorization token is required."
@@ -613,7 +1350,8 @@ def get_current_user():
 
         return jsonify({
 
-            "success": False,
+            "success":
+                False,
 
             "message":
                 "Invalid authorization token."
@@ -630,7 +1368,8 @@ def get_current_user():
 
         return jsonify({
 
-            "success": False,
+            "success":
+                False,
 
             "message":
                 "Invalid or expired session."
@@ -640,7 +1379,8 @@ def get_current_user():
 
     return jsonify({
 
-        "success": True,
+        "success":
+            True,
 
         "user":
             auth_data["user"]
@@ -676,6 +1416,7 @@ def logout():
             1
         ).strip()
 
+
         AUTH_TOKENS.pop(
             token,
             None
@@ -684,7 +1425,8 @@ def logout():
 
     return jsonify({
 
-        "success": True,
+        "success":
+            True,
 
         "message":
             "Logged out successfully."
@@ -707,11 +1449,13 @@ def load_model():
     global DATASET_INFO
     global MODEL_LOADED
 
+
     print()
     print("=" * 70)
     print("LOADING SIGN MODEL")
     print("=" * 70)
     print()
+
 
     print(
         "Model path:"
@@ -766,7 +1510,9 @@ def load_model():
 
         LABELS = MODEL_DATA.get(
             "labels",
-            list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+            list(
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            )
         )
 
 
@@ -870,11 +1616,13 @@ def load_model():
             )
         )
 
+
         validation_accuracy = format_accuracy(
             PERFORMANCE.get(
                 "validation_accuracy_percent"
             )
         )
+
 
         test_accuracy = format_accuracy(
             PERFORMANCE.get(
@@ -969,7 +1717,9 @@ def load_model():
 # 21 landmarks × 3 coordinates = 63 features
 # ============================================================
 
-def extract_landmarks_from_image(image):
+def extract_landmarks_from_image(
+    image
+):
 
     if image is None:
 
@@ -990,8 +1740,6 @@ def extract_landmarks_from_image(image):
 
         # ====================================================
         # RESIZE IMAGE
-        #
-        # Limit image size to reduce memory/CPU usage.
         # ====================================================
 
         height, width = image_rgb.shape[:2]
@@ -1122,7 +1870,9 @@ def extract_landmarks_from_image(image):
 # GET SIGN METRICS
 # ============================================================
 
-def get_sign_metrics(label):
+def get_sign_metrics(
+    label
+):
 
     result = {
 
@@ -1131,6 +1881,7 @@ def get_sign_metrics(label):
 
         "support":
             None
+
     }
 
 
@@ -1258,7 +2009,9 @@ def get_sign_metrics(label):
 # SAVE PREDICTION
 # ============================================================
 
-def save_prediction(prediction):
+def save_prediction(
+    prediction
+):
 
     global PREDICTIONS
 
@@ -1298,7 +2051,8 @@ def process_prediction(
 
         return {
 
-            "success": False,
+            "success":
+                False,
 
             "message":
                 "AI model is not loaded."
@@ -1327,7 +2081,8 @@ def process_prediction(
 
             return {
 
-                "success": False,
+                "success":
+                    False,
 
                 "message":
                     "No hand detected in the image. "
@@ -1357,7 +2112,8 @@ def process_prediction(
 
             return {
 
-                "success": False,
+                "success":
+                    False,
 
                 "message":
                     "Feature count mismatch.",
@@ -1505,7 +2261,8 @@ def process_prediction(
 
         response = {
 
-            "success": True,
+            "success":
+                True,
 
             "label":
                 predicted_label,
@@ -1553,6 +2310,7 @@ def process_prediction(
 
             "timestamp":
                 time.time()
+
         }
 
 
@@ -1624,17 +2382,20 @@ def process_prediction(
         print("=" * 70)
         print("PREDICTION PROCESSING ERROR")
         print("=" * 70)
+
         print(
             "Error:",
             error
         )
+
         print("=" * 70)
         print()
 
 
         return {
 
-            "success": False,
+            "success":
+                False,
 
             "message":
                 "Prediction processing failed.",
@@ -1647,18 +2408,21 @@ def process_prediction(
 
     finally:
 
-        # ====================================================
-        # CLEAN TEMPORARY MEMORY
-        # ====================================================
-
         try:
+
             del image
+
         except Exception:
+
             pass
 
+
         try:
+
             gc.collect()
+
         except Exception:
+
             pass
 
 
@@ -1717,7 +2481,12 @@ def health():
             MODEL_LOADED,
 
         "google_auth_configured":
-            bool(GOOGLE_CLIENT_ID),
+            bool(
+                GOOGLE_CLIENT_ID
+            ),
+
+        "email_auth_configured":
+            True,
 
         "model":
             "Random Forest Classifier",
@@ -1757,7 +2526,13 @@ def health():
             "/api/predict/frame",
 
         "google_login_endpoint":
-            "/api/auth/google"
+            "/api/auth/google",
+
+        "email_register_endpoint":
+            "/api/auth/register",
+
+        "email_login_endpoint":
+            "/api/auth/login"
 
     })
 
@@ -1910,7 +2685,10 @@ def predict():
         # LIMIT UPLOAD SIZE
         # ====================================================
 
-        max_upload_size = 10 * 1024 * 1024
+        max_upload_size = (
+            10 * 1024 * 1024
+        )
+
 
         if len(file_bytes) > max_upload_size:
 
@@ -2048,7 +2826,10 @@ def predict_frame():
         # LIMIT FRAME SIZE
         # ====================================================
 
-        max_frame_size = 5 * 1024 * 1024
+        max_frame_size = (
+            5 * 1024 * 1024
+        )
+
 
         if len(file_bytes) > max_frame_size:
 
@@ -2203,7 +2984,12 @@ def root():
             MODEL_LOADED,
 
         "google_auth_configured":
-            bool(GOOGLE_CLIENT_ID),
+            bool(
+                GOOGLE_CLIENT_ID
+            ),
+
+        "email_auth_configured":
+            True,
 
         "endpoints": {
 
@@ -2212,6 +2998,12 @@ def root():
 
             "model_info":
                 "/api/model-info",
+
+            "register":
+                "/api/auth/register",
+
+            "login":
+                "/api/auth/login",
 
             "google_login":
                 "/api/auth/google",
@@ -2246,15 +3038,32 @@ print("SIGN AI BACKEND STARTING")
 print("=" * 70)
 print()
 
+
 print(
     "Model:",
     MODEL_PATH
 )
 
+
 print(
     "Google Auth:",
-    bool(GOOGLE_CLIENT_ID)
+    bool(
+        GOOGLE_CLIENT_ID
+    )
 )
+
+
+print(
+    "Email Auth:",
+    True
+)
+
+
+print(
+    "Auth Database:",
+    AUTH_DB
+)
+
 
 print()
 
@@ -2277,49 +3086,106 @@ if __name__ == "__main__":
     print("SIGN AI BACKEND")
     print("=" * 70)
 
+
     print()
     print("Server:")
-    print("http://localhost:5000")
+    print(
+        "http://localhost:5000"
+    )
+
 
     print()
     print("Health:")
-    print("http://localhost:5000/api/health")
+    print(
+        "http://localhost:5000/api/health"
+    )
+
 
     print()
     print("Model Info:")
-    print("http://localhost:5000/api/model-info")
+    print(
+        "http://localhost:5000/api/model-info"
+    )
+
+
+    print()
+    print("Register:")
+    print(
+        "POST http://localhost:5000/api/auth/register"
+    )
+
+
+    print()
+    print("Email Login:")
+    print(
+        "POST http://localhost:5000/api/auth/login"
+    )
+
 
     print()
     print("Google Login:")
-    print("POST http://localhost:5000/api/auth/google")
+    print(
+        "POST http://localhost:5000/api/auth/google"
+    )
+
 
     print()
     print("Current User:")
-    print("GET http://localhost:5000/api/auth/me")
+    print(
+        "GET http://localhost:5000/api/auth/me"
+    )
+
 
     print()
     print("Logout:")
-    print("POST http://localhost:5000/api/auth/logout")
+    print(
+        "POST http://localhost:5000/api/auth/logout"
+    )
+
 
     print()
     print("Normal Prediction:")
-    print("POST http://localhost:5000/api/predict")
+    print(
+        "POST http://localhost:5000/api/predict"
+    )
+
 
     print()
     print("Live Prediction:")
-    print("POST http://localhost:5000/api/predict/frame")
+    print(
+        "POST http://localhost:5000/api/predict/frame"
+    )
+
 
     print()
     print("Prediction History:")
-    print("GET http://localhost:5000/api/predictions")
+    print(
+        "GET http://localhost:5000/api/predictions"
+    )
+
 
     print()
     print("Model Loaded:")
-    print(MODEL_LOADED)
+    print(
+        MODEL_LOADED
+    )
+
 
     print()
     print("Google Auth Configured:")
-    print(bool(GOOGLE_CLIENT_ID))
+    print(
+        bool(
+            GOOGLE_CLIENT_ID
+        )
+    )
+
+
+    print()
+    print("Email Auth Configured:")
+    print(
+        True
+    )
+
 
     print()
     print("=" * 70)
@@ -2327,11 +3193,13 @@ if __name__ == "__main__":
 
     app.run(
         host="0.0.0.0",
+
         port=int(
             os.getenv(
                 "PORT",
                 "5000"
             )
         ),
+
         debug=False
     )
