@@ -16,9 +16,10 @@ import {
 } from "lucide-react";
 
 const GOOGLE_CLIENT_ID =
-  import.meta.env.VITE_GOOGLE_CLIENT_ID;
-  
-const API_URL = import.meta.env.VITE_API_URL;
+  import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
+
+const API_URL =
+  import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 const Login = () => {
   const navigate = useNavigate();
@@ -37,7 +38,7 @@ const Login = () => {
   const [success, setSuccess] = useState("");
 
   // =========================================================
-  // REDIRECT
+  // REDIRECT AFTER LOGIN
   // =========================================================
 
   const redirectAfterLogin = () => {
@@ -58,6 +59,7 @@ const Login = () => {
 
   const handleGoogleResponse = async (response) => {
     if (!response?.credential) {
+      setGoogleLoading(false);
       setError("Google authentication failed.");
       return;
     }
@@ -84,22 +86,23 @@ const Login = () => {
 
       if (!result.ok) {
         throw new Error(
-          data.message || "Google login failed."
+          data.message ||
+            "Google login failed."
         );
       }
 
-      // -------------------------------------------------------
+      // =====================================================
       // LOGIN STATUS
-      // -------------------------------------------------------
+      // =====================================================
 
       localStorage.setItem(
         "isLoggedIn",
         "true"
       );
 
-      // -------------------------------------------------------
+      // =====================================================
       // TOKEN
-      // -------------------------------------------------------
+      // =====================================================
 
       if (data.token) {
         localStorage.setItem(
@@ -113,9 +116,9 @@ const Login = () => {
         );
       }
 
-      // -------------------------------------------------------
+      // =====================================================
       // USER
-      // -------------------------------------------------------
+      // =====================================================
 
       if (data.user) {
         localStorage.setItem(
@@ -156,10 +159,10 @@ const Login = () => {
       );
 
       setError(
-        err.message ||
+        err?.message ||
           "Unable to sign in with Google."
       );
-    } finally {
+
       setGoogleLoading(false);
     }
   };
@@ -174,6 +177,10 @@ const Login = () => {
         "VITE_GOOGLE_CLIENT_ID is missing."
       );
 
+      setError(
+        "Google Sign-In is not configured."
+      );
+
       return;
     }
 
@@ -181,36 +188,43 @@ const Login = () => {
       if (
         !window.google ||
         !window.google.accounts ||
+        !window.google.accounts.id ||
         !googleButtonRef.current
       ) {
         return;
       }
 
-      window.google.accounts.id.initialize({
-        client_id: GOOGLE_CLIENT_ID,
-        callback: handleGoogleResponse,
-        auto_select: false,
-        cancel_on_tap_outside: true,
-      });
+      try {
+        window.google.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          callback: handleGoogleResponse,
+          auto_select: false,
+          cancel_on_tap_outside: true,
+        });
 
-      /*
-       * We use Google's hidden rendered button only
-       * as the authentication trigger.
-       */
+        googleButtonRef.current.innerHTML = "";
 
-      googleButtonRef.current.innerHTML = "";
+        window.google.accounts.id.renderButton(
+          googleButtonRef.current,
+          {
+            theme: "outline",
+            size: "large",
+            width: 400,
+            text: "continue_with",
+            shape: "rectangular",
+            logo_alignment: "left",
+          }
+        );
+      } catch (error) {
+        console.error(
+          "Google initialization error:",
+          error
+        );
 
-      window.google.accounts.id.renderButton(
-        googleButtonRef.current,
-        {
-          theme: "outline",
-          size: "large",
-          width: 400,
-          text: "continue_with",
-          shape: "rectangular",
-          logo_alignment: "left",
-        }
-      );
+        setError(
+          "Unable to initialize Google Sign-In."
+        );
+      }
     };
 
     const existingScript =
@@ -228,7 +242,12 @@ const Login = () => {
         );
       }
 
-      return;
+      return () => {
+        existingScript.removeEventListener(
+          "load",
+          initializeGoogle
+        );
+      };
     }
 
     const script =
@@ -259,37 +278,38 @@ const Login = () => {
     document.head.appendChild(
       script
     );
+
+    return () => {
+      script.onload = null;
+    };
   }, []);
 
   // =========================================================
-  // CUSTOM GOOGLE BUTTON
+  // GOOGLE BUTTON CLICK
   // =========================================================
 
   const handleGoogleButtonClick = () => {
-    if (googleLoading) return;
+    if (googleLoading) {
+      return;
+    }
 
     setError("");
     setSuccess("");
 
-    /*
-     * Google Identity Services does not expose a direct
-     * click API for the rendered button.
-     *
-     * Therefore we trigger the official Google button.
-     */
+    const container =
+      googleButtonRef.current;
 
-    const googleIframe =
-      googleButtonRef.current?.querySelector(
-        "iframe"
+    if (!container) {
+      setError(
+        "Google Sign-In is still loading. Please try again."
       );
 
-    if (googleIframe) {
-      googleIframe.style.pointerEvents =
-        "auto";
+      return;
     }
 
+    // Google renders an iframe/button inside this container.
     const googleButton =
-      googleButtonRef.current?.querySelector(
+      container.querySelector(
         '[role="button"]'
       );
 
@@ -298,6 +318,7 @@ const Login = () => {
       return;
     }
 
+    // Sometimes Google needs a little more time.
     setError(
       "Google Sign-In is still loading. Please try again."
     );
@@ -316,9 +337,12 @@ const Login = () => {
     const cleanEmail =
       email.trim();
 
+    const cleanPassword =
+      password.trim();
+
     if (
       !cleanEmail ||
-      !password.trim()
+      !cleanPassword
     ) {
       setError(
         "Please enter your email and password."
@@ -329,9 +353,9 @@ const Login = () => {
 
     setIsLoading(true);
 
-    // -------------------------------------------------------
+    // =======================================================
     // DEMO LOGIN
-    // -------------------------------------------------------
+    // =======================================================
 
     setTimeout(() => {
       localStorage.setItem(
@@ -339,9 +363,9 @@ const Login = () => {
         "true"
       );
 
-      // -----------------------------------------------------
+      // =====================================================
       // EXISTING USER
-      // -----------------------------------------------------
+      // =====================================================
 
       const existingUser =
         localStorage.getItem(
@@ -364,9 +388,9 @@ const Login = () => {
         }
       }
 
-      // -----------------------------------------------------
+      // =====================================================
       // CREATE USER
-      // -----------------------------------------------------
+      // =====================================================
 
       if (!user) {
         const nameFromEmail =
@@ -397,9 +421,9 @@ const Login = () => {
         };
       }
 
-      // -----------------------------------------------------
+      // =====================================================
       // SAVE USER
-      // -----------------------------------------------------
+      // =====================================================
 
       localStorage.setItem(
         "signai-user",
@@ -435,6 +459,62 @@ const Login = () => {
         dark:text-white
       "
     >
+
+      {/* =====================================================
+          CHROME / EDGE AUTOFILL FIX
+      ===================================================== */}
+
+      <style>{`
+        /* Light mode autofill */
+        input:-webkit-autofill,
+        input:-webkit-autofill:hover,
+        input:-webkit-autofill:focus,
+        input:-webkit-autofill:active {
+          -webkit-text-fill-color: #0f172a !important;
+          -webkit-box-shadow:
+            0 0 0 1000px #f8fafc inset !important;
+          box-shadow:
+            0 0 0 1000px #f8fafc inset !important;
+          caret-color: #0f172a !important;
+        }
+
+        /* Dark mode autofill */
+        .dark input:-webkit-autofill,
+        .dark input:-webkit-autofill:hover,
+        .dark input:-webkit-autofill:focus,
+        .dark input:-webkit-autofill:active {
+          -webkit-text-fill-color: #ffffff !important;
+          -webkit-box-shadow:
+            0 0 0 1000px #1e293b inset !important;
+          box-shadow:
+            0 0 0 1000px #1e293b inset !important;
+          caret-color: #ffffff !important;
+        }
+
+        /* Dark mode normal input */
+        .dark input {
+          color: #ffffff;
+          caret-color: #ffffff;
+        }
+
+        /* Dark mode placeholder */
+        .dark input::placeholder {
+          color: #64748b;
+        }
+
+        /* Password input */
+        .dark input[type="password"],
+        .dark input[type="text"] {
+          color: #ffffff;
+        }
+
+        /* Keep autofill transition from flashing white */
+        input:-webkit-autofill {
+          transition:
+            background-color 9999s ease-in-out 0s;
+        }
+      `}</style>
+
       {/* =====================================================
           BACKGROUND
       ===================================================== */}
@@ -548,6 +628,7 @@ const Login = () => {
             max-w-md
           "
         >
+
           {/* =================================================
               BRAND
           ================================================= */}
@@ -650,7 +731,8 @@ const Login = () => {
               sm:p-8
             "
           >
-            {/* Card glow */}
+
+            {/* CARD GLOW */}
 
             <div
               className="
@@ -667,11 +749,13 @@ const Login = () => {
             />
 
             <div className="relative">
+
               {/* =================================================
                   HEADER
               ================================================= */}
 
               <div className="mb-6">
+
                 <div
                   className="
                     mb-3
@@ -718,6 +802,7 @@ const Login = () => {
                   Continue to your SignAI
                   workspace.
                 </p>
+
               </div>
 
               {/* =================================================
@@ -795,9 +880,11 @@ const Login = () => {
                 onSubmit={handleLogin}
                 className="space-y-5"
               >
+
                 {/* EMAIL */}
 
                 <div>
+
                   <label
                     htmlFor="email"
                     className="
@@ -813,6 +900,7 @@ const Login = () => {
                   </label>
 
                   <div className="relative">
+
                     <Mail
                       size={18}
                       className="
@@ -837,6 +925,7 @@ const Login = () => {
                         setEmail(
                           e.target.value
                         );
+
                         setError("");
                         setSuccess("");
                       }}
@@ -867,13 +956,24 @@ const Login = () => {
                         dark:focus:bg-slate-800
                       "
                     />
+
                   </div>
+
                 </div>
 
                 {/* PASSWORD */}
 
                 <div>
-                  <div className="mb-2 flex items-center justify-between">
+
+                  <div
+                    className="
+                      mb-2
+                      flex
+                      items-center
+                      justify-between
+                    "
+                  >
+
                     <label
                       htmlFor="password"
                       className="
@@ -903,9 +1003,11 @@ const Login = () => {
                     >
                       Forgot password?
                     </button>
+
                   </div>
 
                   <div className="relative">
+
                     <Lock
                       size={18}
                       className="
@@ -934,6 +1036,7 @@ const Login = () => {
                         setPassword(
                           e.target.value
                         );
+
                         setError("");
                         setSuccess("");
                       }}
@@ -961,6 +1064,7 @@ const Login = () => {
                         dark:bg-slate-800
                         dark:text-white
                         dark:placeholder:text-slate-500
+                        dark:focus:bg-slate-800
                       "
                     />
 
@@ -1003,7 +1107,9 @@ const Login = () => {
                         />
                       )}
                     </button>
+
                   </div>
+
                 </div>
 
                 {/* =================================================
@@ -1064,6 +1170,7 @@ const Login = () => {
                     </>
                   )}
                 </button>
+
               </form>
 
               {/* =================================================
@@ -1078,6 +1185,7 @@ const Login = () => {
                   gap-3
                 "
               >
+
                 <div
                   className="
                     h-px
@@ -1108,6 +1216,7 @@ const Login = () => {
                     dark:bg-slate-800
                   "
                 />
+
               </div>
 
               {/* =================================================
@@ -1154,9 +1263,10 @@ const Login = () => {
                   dark:bg-slate-800
                   dark:text-slate-200
                   dark:hover:border-slate-600
-                  dark:hover:bg-slate-750
+                  dark:hover:bg-slate-700
                 "
               >
+
                 {googleLoading ? (
                   <>
                     <span
@@ -1177,7 +1287,7 @@ const Login = () => {
                   </>
                 ) : (
                   <>
-                    {/* Google Icon */}
+                    {/* GOOGLE ICON */}
 
                     <svg
                       width="20"
@@ -1211,6 +1321,7 @@ const Login = () => {
                     </span>
                   </>
                 )}
+
               </button>
 
               {/* =================================================
@@ -1246,6 +1357,7 @@ const Login = () => {
                   dark:border-slate-800
                 "
               >
+
                 <p
                   className="
                     text-sm
@@ -1270,7 +1382,9 @@ const Login = () => {
                     Create an account
                   </Link>
                 </p>
+
               </div>
+
             </div>
           </div>
 
@@ -1317,6 +1431,7 @@ const Login = () => {
             By continuing, you agree to use
             SignAI responsibly.
           </p>
+
         </div>
       </main>
     </div>
