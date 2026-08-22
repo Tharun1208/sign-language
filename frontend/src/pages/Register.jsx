@@ -161,6 +161,7 @@ const Register = () => {
           fullName,
           email,
           password,
+          confirmPassword,
         },
         {
           headers: {
