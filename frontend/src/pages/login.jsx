@@ -21,6 +21,39 @@ const GOOGLE_CLIENT_ID =
 const API_URL =
   import.meta.env.VITE_API_URL || "http://localhost:5000";
 
+// =========================================================
+// GOOGLE ICON
+// =========================================================
+
+const GoogleIcon = () => (
+  <svg
+    width="20"
+    height="20"
+    viewBox="0 0 24 24"
+    aria-hidden="true"
+  >
+    <path
+      fill="#4285F4"
+      d="M23.49 12.27c0-.79-.07-1.55-.2-2.27H12v4.3h6.44a5.5 5.5 0 0 1-2.39 3.61v3h3.87c2.27-2.09 3.57-5.17 3.57-8.64Z"
+    />
+
+    <path
+      fill="#34A853"
+      d="M12 24c3.24 0 5.96-1.07 7.95-2.9l-3.87-3c-1.07.72-2.44 1.15-4.08 1.15-3.13 0-5.79-2.11-6.74-4.95H1.26v3.1A12 12 0 0 0 12 24Z"
+    />
+
+    <path
+      fill="#FBBC05"
+      d="M5.26 14.3A7.2 7.2 0 0 1 4.88 12c0-.8.14-1.58.38-2.3V6.6H1.26A12 12 0 0 0 0 12c0 1.94.46 3.77 1.26 5.4l4-3.1Z"
+    />
+
+    <path
+      fill="#EA4335"
+      d="M12 4.75c1.77 0 3.36.61 4.61 1.81l3.45-3.45C17.95 1.12 15.24 0 12 0A12 12 0 0 0 1.26 6.6l4 3.1 4 3.1C6.21 6.86 8.87 4.75 12 4.75Z"
+    />
+  </svg>
+);
+
 const Login = () => {
   const navigate = useNavigate();
 
@@ -323,7 +356,6 @@ const Login = () => {
         return;
       }
 
-      // Prevent duplicate initialization
       if (googleInitializedRef.current) {
         console.log(
           "Google Sign-In already initialized."
@@ -349,10 +381,8 @@ const Login = () => {
           cancel_on_tap_outside: true,
         });
 
-        // Clear previous button
         googleButtonRef.current.innerHTML = "";
 
-        // Render REAL Google button
         window.google.accounts.id.renderButton(
           googleButtonRef.current,
           {
@@ -383,9 +413,9 @@ const Login = () => {
       }
     };
 
-    // -------------------------------------------------------
-    // Google script already exists
-    // -------------------------------------------------------
+    // =======================================================
+    // EXISTING SCRIPT
+    // =======================================================
 
     const existingScript =
       document.getElementById(
@@ -416,9 +446,9 @@ const Login = () => {
       };
     }
 
-    // -------------------------------------------------------
-    // Create Google script
-    // -------------------------------------------------------
+    // =======================================================
+    // CREATE GOOGLE SCRIPT
+    // =======================================================
 
     console.log(
       "Loading Google Identity Services..."
@@ -521,6 +551,15 @@ const Login = () => {
         input:-webkit-autofill {
           transition:
             background-color 9999s ease-in-out 0s;
+        }
+
+        /*
+          Google GIS iframe/button is placed over
+          our custom button.
+        */
+        .google-overlay iframe {
+          width: 100% !important;
+          height: 100% !important;
         }
       `}</style>
 
@@ -836,7 +875,9 @@ const Login = () => {
                     className="mt-0.5 shrink-0"
                   />
 
-                  <span>{error}</span>
+                  <span>
+                    {error}
+                  </span>
                 </div>
               )}
 
@@ -920,7 +961,10 @@ const Login = () => {
                       autoComplete="email"
                       value={email}
                       onChange={(e) => {
-                        setEmail(e.target.value);
+                        setEmail(
+                          e.target.value
+                        );
+
                         setError("");
                         setSuccess("");
                       }}
@@ -1213,48 +1257,102 @@ const Login = () => {
 
               <div className="w-full">
 
-                {googleLoading && (
+                <div
+                  className="
+                    relative
+                    h-[50px]
+                    w-full
+                  "
+                >
+
+                  {/* -------------------------------------------
+                      CUSTOM GOOGLE BUTTON
+                  ------------------------------------------- */}
+
                   <div
                     className="
-                      mb-3
+                      absolute
+                      inset-0
+                      z-10
                       flex
+                      w-full
                       items-center
                       justify-center
-                      gap-2
+                      gap-3
+                      rounded-xl
+                      border
+                      border-slate-200
+                      bg-white
+                      px-4
+                      py-3
                       text-sm
-                      text-slate-500
-                      dark:text-slate-400
+                      font-semibold
+                      text-slate-700
+                      shadow-sm
+                      transition-all
+                      duration-200
+                      dark:border-slate-700
+                      dark:bg-slate-800
+                      dark:text-slate-200
                     "
                   >
-                    <span
+
+                    {googleLoading ? (
+                      <>
+                        <span
+                          className="
+                            h-5
+                            w-5
+                            animate-spin
+                            rounded-full
+                            border-2
+                            border-slate-300
+                            border-t-indigo-600
+                            dark:border-slate-600
+                            dark:border-t-indigo-400
+                          "
+                        />
+
+                        <span>
+                          Signing in with Google...
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <GoogleIcon />
+
+                        <span>
+                          Continue with Google
+                        </span>
+                      </>
+                    )}
+
+                  </div>
+
+                  {/* -------------------------------------------
+                      REAL GOOGLE GIS BUTTON
+                  ------------------------------------------- */}
+
+                  <div
+                    className="
+                      google-overlay
+                      absolute
+                      inset-0
+                      z-20
+                      overflow-hidden
+                      opacity-0
+                    "
+                  >
+                    <div
+                      ref={googleButtonRef}
                       className="
-                        h-4
-                        w-4
-                        animate-spin
-                        rounded-full
-                        border-2
-                        border-slate-300
-                        border-t-indigo-600
+                        h-full
+                        w-full
                       "
                     />
-
-                    Signing in with Google...
                   </div>
-                )}
 
-                {/* REAL GOOGLE BUTTON */}
-
-                <div
-                  ref={googleButtonRef}
-                  className="
-                    flex
-                    min-h-[44px]
-                    w-full
-                    justify-center
-                    overflow-hidden
-                    rounded-xl
-                  "
-                />
+                </div>
 
               </div>
 
@@ -1323,7 +1421,10 @@ const Login = () => {
           >
             <ShieldCheck
               size={14}
-              className="shrink-0 text-emerald-500"
+              className="
+                shrink-0
+                text-emerald-500
+              "
             />
 
             <span>
