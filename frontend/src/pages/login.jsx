@@ -50,13 +50,13 @@ const Login = () => {
   const [success, setSuccess] = useState("");
 
   // =========================================================
-  // GOOGLE
+  // GOOGLE BUTTON REF
   // =========================================================
 
-  const googleInitializedRef = useRef(false);
+  const googleButtonRef = useRef(null);
 
   // =========================================================
-  // REDIRECT
+  // REDIRECT AFTER LOGIN
   // =========================================================
 
   const redirectAfterLogin = () => {
@@ -123,7 +123,7 @@ const Login = () => {
   };
 
   // =========================================================
-  // EMAIL LOGIN
+  // NORMAL EMAIL / PASSWORD LOGIN
   // =========================================================
 
   const handleLogin = async (e) => {
@@ -349,7 +349,7 @@ const Login = () => {
   };
 
   // =========================================================
-  // INITIALIZE GOOGLE IDENTITY SERVICES
+  // GOOGLE IDENTITY SERVICES
   // =========================================================
 
   useEffect(() => {
@@ -358,10 +358,18 @@ const Login = () => {
         "VITE_GOOGLE_CLIENT_ID is missing."
       );
 
+      setError(
+        "Google Sign-In is not configured."
+      );
+
       return;
     }
 
     let cancelled = false;
+
+    // =======================================================
+    // INITIALIZE GOOGLE
+    // =======================================================
 
     const initializeGoogle = () => {
       if (cancelled) {
@@ -377,10 +385,6 @@ const Login = () => {
           "Google Identity Services is not ready yet."
         );
 
-        return;
-      }
-
-      if (googleInitializedRef.current) {
         return;
       }
 
@@ -403,11 +407,43 @@ const Login = () => {
           context: "signin",
         });
 
-        googleInitializedRef.current = true;
-
         console.log(
           "Google Identity Services initialized successfully."
         );
+
+        // ===================================================
+        // RENDER GOOGLE BUTTON
+        // ===================================================
+
+        if (
+          googleButtonRef.current
+        ) {
+          googleButtonRef.current.innerHTML =
+            "";
+
+          window.google.accounts.id.renderButton(
+            googleButtonRef.current,
+            {
+              type: "standard",
+
+              theme: "outline",
+
+              size: "large",
+
+              text: "continue_with",
+
+              shape: "rect",
+
+              width: 400,
+
+              logo_alignment: "left",
+            }
+          );
+
+          console.log(
+            "Google Sign-In button rendered successfully."
+          );
+        }
       } catch (err) {
         console.error(
           "Google initialization error:",
@@ -421,7 +457,7 @@ const Login = () => {
     };
 
     // =======================================================
-    // EXISTING SCRIPT
+    // CHECK EXISTING SCRIPT
     // =======================================================
 
     const existingScript =
@@ -452,7 +488,7 @@ const Login = () => {
     }
 
     // =======================================================
-    // CREATE SCRIPT
+    // LOAD GOOGLE SCRIPT
     // =======================================================
 
     const script =
@@ -494,104 +530,10 @@ const Login = () => {
 
     return () => {
       cancelled = true;
+
+      script.onload = null;
     };
   }, []);
-
-  // =========================================================
-  // CUSTOM GOOGLE BUTTON
-  // =========================================================
-
-  const handleGoogleLogin = () => {
-    if (!GOOGLE_CLIENT_ID) {
-      setError(
-        "Google Sign-In is not configured."
-      );
-
-      return;
-    }
-
-    if (
-      !window.google ||
-      !window.google.accounts ||
-      !window.google.accounts.id
-    ) {
-      setError(
-        "Google Sign-In is still loading. Please try again."
-      );
-
-      console.error(
-        "Google Identity Services is not available."
-      );
-
-      return;
-    }
-
-    try {
-      setError("");
-      setSuccess("");
-      setGoogleLoading(true);
-
-      console.log(
-        "Opening Google Sign-In..."
-      );
-
-      /*
-       * This opens Google's authentication UI.
-       * The actual credential is returned through
-       * handleGoogleResponse().
-       */
-
-      window.google.accounts.id.prompt(
-        (notification) => {
-          console.log(
-            "Google prompt notification:",
-            notification
-          );
-
-          if (
-            notification.isNotDisplayed?.()
-          ) {
-            console.warn(
-              "Google prompt was not displayed."
-            );
-
-            setGoogleLoading(false);
-          }
-
-          if (
-            notification.isSkippedMoment?.()
-          ) {
-            console.warn(
-              "Google prompt was skipped."
-            );
-
-            setGoogleLoading(false);
-          }
-
-          if (
-            notification.isDismissedMoment?.()
-          ) {
-            console.warn(
-              "Google prompt was dismissed."
-            );
-
-            setGoogleLoading(false);
-          }
-        }
-      );
-    } catch (err) {
-      console.error(
-        "Google button error:",
-        err
-      );
-
-      setGoogleLoading(false);
-
-      setError(
-        "Unable to open Google Sign-In. Please try again."
-      );
-    }
-  };
 
   // =========================================================
   // UI
@@ -609,6 +551,7 @@ const Login = () => {
         dark:text-white
       "
     >
+
       {/* =====================================================
           CUSTOM CSS
       ===================================================== */}
@@ -650,6 +593,44 @@ const Login = () => {
         input:-webkit-autofill {
           transition:
             background-color 9999s ease-in-out 0s;
+        }
+
+        /* =====================================================
+           GOOGLE BUTTON
+           IMPORTANT:
+           Do NOT style this like another button.
+           Google itself creates the visible button.
+        ===================================================== */
+
+        .google-login-wrapper {
+          width: 100%;
+          min-height: 46px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          overflow: hidden;
+        }
+
+        .google-login-wrapper > div {
+          width: 100% !important;
+          max-width: 400px !important;
+          display: flex !important;
+          justify-content: center !important;
+        }
+
+        .google-login-wrapper iframe {
+          display: block !important;
+          max-width: 100% !important;
+        }
+
+        @media (max-width: 480px) {
+          .google-login-wrapper {
+            min-height: 44px;
+          }
+
+          .google-login-wrapper > div {
+            max-width: 100% !important;
+          }
         }
       `}</style>
 
@@ -864,6 +845,7 @@ const Login = () => {
               sm:p-8
             "
           >
+
             <div
               className="
                 pointer-events-none
@@ -1001,7 +983,7 @@ const Login = () => {
               )}
 
               {/* =================================================
-                  FORM
+                  LOGIN FORM
               ================================================= */}
 
               <form
@@ -1237,18 +1219,21 @@ const Login = () => {
                 </div>
 
                 {/* =================================================
-                    EMAIL SIGN IN
+                    SIGN IN
                 ================================================= */}
 
                 <button
                   type="submit"
                   disabled={isLoading}
                   className="
+                    group
+                    relative
                     flex
                     w-full
                     items-center
                     justify-center
                     gap-2
+                    overflow-hidden
                     rounded-xl
                     bg-indigo-600
                     py-3.5
@@ -1339,102 +1324,88 @@ const Login = () => {
               </div>
 
               {/* =================================================
-                  GOOGLE BUTTON
+                  GOOGLE SIGN-IN
               ================================================= */}
 
-              <button
-                type="button"
-                onClick={handleGoogleLogin}
-                disabled={
-                  googleLoading ||
-                  !GOOGLE_CLIENT_ID
-                }
+              <div
                 className="
-                  flex
                   w-full
-                  items-center
-                  justify-center
-                  gap-3
-                  rounded-xl
-                  border
-                  border-slate-200
-                  bg-white
-                  py-3.5
-                  text-sm
-                  font-semibold
-                  text-slate-700
-                  shadow-sm
-                  transition-all
-                  duration-200
-                  hover:-translate-y-0.5
-                  hover:border-slate-300
-                  hover:bg-slate-50
-                  hover:shadow-md
-                  active:scale-[0.98]
-                  disabled:cursor-not-allowed
-                  disabled:opacity-70
-                  dark:border-slate-700
-                  dark:bg-slate-800
-                  dark:text-white
-                  dark:hover:border-slate-600
-                  dark:hover:bg-slate-750
+                  overflow-hidden
                 "
               >
-                {googleLoading ? (
-                  <>
-                    <span
-                      className="
-                        h-4
-                        w-4
-                        animate-spin
-                        rounded-full
-                        border-2
-                        border-slate-300
-                        border-t-indigo-600
-                        dark:border-slate-600
-                        dark:border-t-indigo-400
-                      "
-                    />
-
-                    Signing in with Google...
-                  </>
+                {!GOOGLE_CLIENT_ID ? (
+                  <div
+                    className="
+                      w-full
+                      rounded-xl
+                      border
+                      border-red-200
+                      bg-red-50
+                      px-4
+                      py-3
+                      text-center
+                      text-sm
+                      text-red-600
+                      dark:border-red-500/20
+                      dark:bg-red-500/10
+                      dark:text-red-400
+                    "
+                  >
+                    Google Sign-In is not
+                    configured.
+                  </div>
                 ) : (
-                  <>
-                    {/* Google Logo */}
-
-                    <svg
-                      width="19"
-                      height="19"
-                      viewBox="0 0 24 24"
-                      aria-hidden="true"
-                    >
-                      <path
-                        fill="#4285F4"
-                        d="M21.35 12.27c0-.71-.06-1.39-.18-2.05H12v3.88h5.24a4.48 4.48 0 0 1-1.95 2.94v2.45h3.16c1.85-1.7 2.9-4.2 2.9-7.22Z"
-                      />
-
-                      <path
-                        fill="#34A853"
-                        d="M12 21.75c2.64 0 4.86-.87 6.48-2.36l-3.16-2.45c-.88.59-2.01.94-3.32.94-2.55 0-4.71-1.72-5.49-4.03H3.24v2.53A9.79 9.79 0 0 0 12 21.75Z"
-                      />
-
-                      <path
-                        fill="#FBBC05"
-                        d="M6.51 13.85A5.88 5.88 0 0 1 6.2 12c0-.64.11-1.26.31-1.85V7.62H3.24A9.75 9.75 0 0 0 2.25 12c0 1.57.38 3.05.99 4.38l3.27-2.53Z"
-                      />
-
-                      <path
-                        fill="#EA4335"
-                        d="M12 6.12c1.44 0 2.73.5 3.75 1.48l2.81-2.81C16.86 3.18 14.64 2.25 12 2.25a9.79 9.79 0 0 0-8.76 5.37l3.27 2.53C7.29 7.84 9.45 6.12 12 6.12Z"
-                      />
-                    </svg>
-
-                    <span>
-                      Continue with Google
-                    </span>
-                  </>
+                  <div
+                    ref={
+                      googleButtonRef
+                    }
+                    className="
+                      google-login-wrapper
+                      flex
+                      min-h-[46px]
+                      w-full
+                      items-center
+                      justify-center
+                    "
+                  />
                 )}
-              </button>
+              </div>
+
+              {/* =================================================
+                  GOOGLE LOADING
+              ================================================= */}
+
+              {googleLoading && (
+                <div
+                  className="
+                    mt-3
+                    flex
+                    items-center
+                    justify-center
+                    gap-2
+                    text-xs
+                    font-medium
+                    text-slate-500
+                    dark:text-slate-400
+                  "
+                >
+                  <span
+                    className="
+                      h-3.5
+                      w-3.5
+                      animate-spin
+                      rounded-full
+                      border-2
+                      border-slate-300
+                      border-t-indigo-600
+                      dark:border-slate-600
+                      dark:border-t-indigo-400
+                    "
+                  />
+
+                  Signing in with Google...
+                </div>
+              )}
 
               {/* =================================================
                   REGISTER
