@@ -184,7 +184,10 @@ const Register = () => {
         confirmPassword: "",
       });
 
-      // Redirect after successful registration
+      // -------------------------------------------------------
+      // REDIRECT TO LOGIN
+      // -------------------------------------------------------
+
       setTimeout(() => {
         navigate("/login", {
           state: {
@@ -207,9 +210,7 @@ const Register = () => {
           "Unable to connect to the server. Please make sure the backend is running."
         );
       } else {
-        setError(
-          "Something went wrong. Please try again."
-        );
+        setError("Something went wrong. Please try again.");
       }
     } finally {
       setIsLoading(false);
@@ -280,7 +281,7 @@ const Register = () => {
       />
 
       {/* =====================================================
-          GRID EFFECT
+          GRID
       ===================================================== */}
 
       <div
@@ -492,6 +493,7 @@ const Register = () => {
               sm:p-8
             "
           >
+
             {/* CARD GLOW */}
 
             <div
