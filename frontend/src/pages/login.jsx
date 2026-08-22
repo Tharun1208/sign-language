@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useRef,
   useState,
 } from "react";
 
@@ -26,43 +27,6 @@ const API_URL =
   import.meta.env.VITE_API_URL ||
   "http://localhost:5000";
 
-/* =========================================================
-   GOOGLE ICON
-========================================================= */
-
-const GoogleIcon = () => (
-  <svg
-    width="19"
-    height="19"
-    viewBox="0 0 24 24"
-    aria-hidden="true"
-  >
-    <path
-      fill="#4285F4"
-      d="M21.805 10.023h-9.765v3.955h5.625c-.242 1.272-.968 2.347-2.062 3.072v2.55h3.34c1.955-1.8 3.082-4.45 3.082-7.577 0-.727-.078-1.426-.22-2z"
-    />
-
-    <path
-      fill="#34A853"
-      d="M12.04 20c2.79 0 5.13-.923 6.84-2.5l-3.34-2.55c-.923.62-2.1.987-3.5.987-2.69 0-4.972-1.817-5.787-4.258H2.8v2.633A10.34 10.34 0 0 0 12.04 20z"
-    />
-
-    <path
-      fill="#FBBC05"
-      d="M6.253 11.679A6.215 6.215 0 0 1 5.93 9.72c0-.68.117-1.34.323-1.958V5.129H2.8A10.341 10.341 0 0 0 1.7 9.72c0 1.66.398 3.23 1.1 4.591l3.453-2.632z"
-    />
-
-    <path
-      fill="#EA4335"
-      d="M12.04 3.504c1.52 0 2.88.523 3.955 1.55l2.967-2.967C17.166.43 14.827 0 12.04 0A10.34 10.34 0 0 0 2.8 5.129l3.453 2.633C7.068 5.32 9.35 3.504 12.04 3.504z"
-    />
-  </svg>
-);
-
-/* =========================================================
-   LOGIN
-========================================================= */
-
 const Login = () => {
   const navigate = useNavigate();
 
@@ -84,6 +48,12 @@ const Login = () => {
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+
+  // =========================================================
+  // GOOGLE BUTTON REF
+  // =========================================================
+
+  const googleButtonRef = useRef(null);
 
   // =========================================================
   // REDIRECT AFTER LOGIN
@@ -398,6 +368,61 @@ const Login = () => {
     let cancelled = false;
 
     // =======================================================
+    // RENDER GOOGLE BUTTON
+    // =======================================================
+
+    const renderGoogleButton = () => {
+      if (
+        cancelled ||
+        !googleButtonRef.current ||
+        !window.google?.accounts?.id
+      ) {
+        return;
+      }
+
+      const container =
+        googleButtonRef.current;
+
+      /*
+        Important:
+        Google creates its own iframe.
+        We only control the container.
+      */
+
+      container.innerHTML = "";
+
+      try {
+        window.google.accounts.id.renderButton(
+          container,
+          {
+            type: "standard",
+
+            theme: "outline",
+
+            size: "large",
+
+            text: "signin_with",
+
+            shape: "rect",
+
+            width: 400,
+
+            logo_alignment: "left",
+          }
+        );
+
+        console.log(
+          "Google Sign-In button rendered successfully."
+        );
+      } catch (err) {
+        console.error(
+          "Google button render error:",
+          err
+        );
+      }
+    };
+
+    // =======================================================
     // INITIALIZE GOOGLE
     // =======================================================
 
@@ -435,11 +460,15 @@ const Login = () => {
           cancel_on_tap_outside: true,
 
           context: "signin",
+
+          ux_mode: "popup",
         });
 
         console.log(
           "Google Identity Services initialized successfully."
         );
+
+        renderGoogleButton();
       } catch (err) {
         console.error(
           "Google initialization error:",
@@ -453,7 +482,7 @@ const Login = () => {
     };
 
     // =======================================================
-    // EXISTING GOOGLE SCRIPT
+    // EXISTING SCRIPT
     // =======================================================
 
     const existingScript =
@@ -469,7 +498,8 @@ const Login = () => {
       } else {
         existingScript.addEventListener(
           "load",
-          initializeGoogle
+          initializeGoogle,
+          { once: true }
         );
       }
 
@@ -532,68 +562,6 @@ const Login = () => {
   }, []);
 
   // =========================================================
-  // HANDLE GOOGLE BUTTON CLICK
-  // =========================================================
-
-  const handleGoogleClick = () => {
-    setError("");
-    setSuccess("");
-
-    if (
-      !window.google?.accounts?.id
-    ) {
-      setError(
-        "Google Sign-In is still loading. Please try again."
-      );
-
-      return;
-    }
-
-    setGoogleLoading(true);
-
-    try {
-      /*
-       * This opens Google's Identity Services
-       * sign-in flow.
-       *
-       * Your existing handleGoogleResponse()
-       * receives the credential.
-       */
-
-      window.google.accounts.id.prompt(
-        (notification) => {
-          console.log(
-            "Google prompt notification:",
-            notification
-          );
-
-          if (
-            notification.isNotDisplayed?.() ||
-            notification.isSkippedMoment?.()
-          ) {
-            setGoogleLoading(false);
-
-            console.warn(
-              "Google Sign-In prompt was not displayed."
-            );
-          }
-        }
-      );
-    } catch (err) {
-      console.error(
-        "Google button error:",
-        err
-      );
-
-      setGoogleLoading(false);
-
-      setError(
-        "Unable to open Google Sign-In. Please try again."
-      );
-    }
-  };
-
-  // =========================================================
   // UI
   // =========================================================
 
@@ -609,6 +577,7 @@ const Login = () => {
         dark:text-white
       "
     >
+
       {/* =====================================================
           CUSTOM CSS
       ===================================================== */}
@@ -661,6 +630,74 @@ const Login = () => {
         input:-webkit-autofill {
           transition:
             background-color 9999s ease-in-out 0s;
+        }
+
+        /* =====================================================
+           GOOGLE BUTTON
+           
+           The Google iframe is generated by Google.
+           This wrapper makes its size/shape match
+           the Sign In button.
+        ===================================================== */
+
+        .google-login-wrapper {
+          width: 100%;
+          height: 52px;
+
+          display: flex;
+          align-items: center;
+          justify-content: center;
+
+          overflow: hidden;
+
+          border-radius: 12px;
+
+          background: transparent;
+        }
+
+        .google-login-wrapper > div {
+          width: 100% !important;
+          max-width: 400px !important;
+
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+        }
+
+        .google-login-wrapper iframe {
+          display: block !important;
+
+          max-width: 100% !important;
+
+          border-radius: 12px !important;
+        }
+
+        /* =====================================================
+           MOBILE
+        ===================================================== */
+
+        @media (max-width: 480px) {
+
+          .google-login-wrapper {
+            height: 50px;
+          }
+
+          .google-login-wrapper > div {
+            max-width: 100% !important;
+          }
+
+        }
+
+        /* =====================================================
+           SMALL MOBILE
+        ===================================================== */
+
+        @media (max-width: 360px) {
+
+          .google-login-wrapper {
+            height: 48px;
+          }
+
         }
 
       `}</style>
@@ -876,6 +913,7 @@ const Login = () => {
               sm:p-8
             "
           >
+
             <div
               className="
                 pointer-events-none
@@ -1321,6 +1359,7 @@ const Login = () => {
                   gap-3
                 "
               >
+
                 <div
                   className="
                     h-px
@@ -1351,103 +1390,93 @@ const Login = () => {
                     dark:bg-slate-800
                   "
                 />
+
               </div>
 
               {/* =================================================
                   GOOGLE SIGN-IN
               ================================================= */}
 
-              {!GOOGLE_CLIENT_ID ? (
+              <div
+                className="
+                  w-full
+                "
+              >
+
+                {!GOOGLE_CLIENT_ID ? (
+
+                  <div
+                    className="
+                      flex
+                      min-h-[52px]
+                      w-full
+                      items-center
+                      justify-center
+                      rounded-xl
+                      bg-red-50
+                      px-4
+                      py-3
+                      text-center
+                      text-sm
+                      font-medium
+                      text-red-600
+                      dark:bg-red-500/10
+                      dark:text-red-400
+                    "
+                  >
+                    Google Sign-In is not
+                    configured.
+                  </div>
+
+                ) : (
+
+                  <div
+                    ref={googleButtonRef}
+                    className="
+                      google-login-wrapper
+                    "
+                  />
+
+                )}
+
+              </div>
+
+              {/* =================================================
+                  GOOGLE LOADING
+              ================================================= */}
+
+              {googleLoading && (
                 <div
                   className="
-                    w-full
-                    rounded-xl
-                    border
-                    border-red-200
-                    bg-red-50
-                    px-4
-                    py-3.5
-                    text-center
-                    text-sm
-                    font-medium
-                    text-red-600
-                    dark:border-red-500/20
-                    dark:bg-red-500/10
-                    dark:text-red-400
-                  "
-                >
-                  Google Sign-In is not
-                  configured.
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  disabled={googleLoading}
-                  onClick={
-                    handleGoogleClick
-                  }
-                  className="
-                    group
-                    relative
+                    mt-3
                     flex
-                    w-full
                     items-center
                     justify-center
-                    gap-2.5
-                    overflow-hidden
-                    rounded-xl
-                    border
-                    border-slate-200
-                    bg-white
-                    py-3.5
-                    text-sm
-                    font-semibold
-                    text-slate-700
-                    shadow-lg
-                    shadow-slate-900/5
-                    transition-all
-                    duration-200
-                    hover:-translate-y-0.5
-                    hover:border-slate-300
-                    hover:bg-slate-50
-                    hover:shadow-xl
-                    active:scale-[0.98]
-                    disabled:cursor-not-allowed
-                    disabled:opacity-70
-                    dark:border-slate-700
-                    dark:bg-slate-800
-                    dark:text-white
-                    dark:shadow-black/10
-                    dark:hover:border-slate-600
-                    dark:hover:bg-slate-750
+                    gap-2
+                    text-xs
+                    font-medium
+                    text-slate-500
+                    dark:text-slate-400
                   "
                 >
-                  {googleLoading ? (
-                    <>
-                      <span
-                        className="
-                          h-4
-                          w-4
-                          animate-spin
-                          rounded-full
-                          border-2
-                          border-slate-300
-                          border-t-indigo-600
-                          dark:border-slate-600
-                          dark:border-t-indigo-400
-                        "
-                      />
 
-                      Signing in with Google...
-                    </>
-                  ) : (
-                    <>
-                      <GoogleIcon />
+                  <span
+                    className="
+                      h-3.5
+                      w-3.5
+                      animate-spin
+                      rounded-full
+                      border-2
+                      border-slate-300
+                      border-t-indigo-600
+                      dark:border-slate-600
+                      dark:border-t-indigo-400
+                    "
+                  />
 
-                      Continue with Google
-                    </>
-                  )}
-                </button>
+                  Signing in with Google...
+
+                </div>
               )}
 
               {/* =================================================
@@ -1464,6 +1493,7 @@ const Login = () => {
                   dark:border-slate-800
                 "
               >
+
                 <p
                   className="
                     text-sm
@@ -1488,6 +1518,7 @@ const Login = () => {
                     Create an account
                   </Link>
                 </p>
+
               </div>
 
             </div>
@@ -1511,6 +1542,7 @@ const Login = () => {
               dark:text-slate-500
             "
           >
+
             <ShieldCheck
               size={14}
               className="shrink-0 text-emerald-500"
@@ -1520,6 +1552,7 @@ const Login = () => {
               Secure access to your SignAI
               workspace
             </span>
+
           </div>
 
           <p
