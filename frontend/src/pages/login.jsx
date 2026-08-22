@@ -21,39 +21,6 @@ const GOOGLE_CLIENT_ID =
 const API_URL =
   import.meta.env.VITE_API_URL || "http://localhost:5000";
 
-// =========================================================
-// GOOGLE ICON
-// =========================================================
-
-const GoogleIcon = () => (
-  <svg
-    width="20"
-    height="20"
-    viewBox="0 0 24 24"
-    aria-hidden="true"
-  >
-    <path
-      fill="#4285F4"
-      d="M23.49 12.27c0-.79-.07-1.55-.2-2.27H12v4.3h6.44a5.5 5.5 0 0 1-2.39 3.61v3h3.87c2.27-2.09 3.57-5.17 3.57-8.64Z"
-    />
-
-    <path
-      fill="#34A853"
-      d="M12 24c3.24 0 5.96-1.07 7.95-2.9l-3.87-3c-1.07.72-2.44 1.15-4.08 1.15-3.13 0-5.79-2.11-6.74-4.95H1.26v3.1A12 12 0 0 0 12 24Z"
-    />
-
-    <path
-      fill="#FBBC05"
-      d="M5.26 14.3A7.2 7.2 0 0 1 4.88 12c0-.8.14-1.58.38-2.3V6.6H1.26A12 12 0 0 0 0 12c0 1.94.46 3.77 1.26 5.4l4-3.1Z"
-    />
-
-    <path
-      fill="#EA4335"
-      d="M12 4.75c1.77 0 3.36.61 4.61 1.81l3.45-3.45C17.95 1.12 15.24 0 12 0A12 12 0 0 0 1.26 6.6l4 3.1 4 3.1C6.21 6.86 8.87 4.75 12 4.75Z"
-    />
-  </svg>
-);
-
 const Login = () => {
   const navigate = useNavigate();
 
@@ -126,7 +93,7 @@ const Login = () => {
   };
 
   // =========================================================
-  // NORMAL EMAIL/PASSWORD LOGIN
+  // NORMAL EMAIL / PASSWORD LOGIN
   // =========================================================
 
   const handleLogin = async (e) => {
@@ -159,11 +126,9 @@ const Login = () => {
         `${API_URL}/api/auth/login`,
         {
           method: "POST",
-
           headers: {
             "Content-Type": "application/json",
           },
-
           body: JSON.stringify({
             email: cleanEmail,
             password: cleanPassword,
@@ -203,12 +168,8 @@ const Login = () => {
       setTimeout(() => {
         redirectAfterLogin();
       }, 500);
-
     } catch (err) {
-      console.error(
-        "Login Error:",
-        err
-      );
+      console.error("Login Error:", err);
 
       setError(
         err?.message ||
@@ -220,13 +181,11 @@ const Login = () => {
   };
 
   // =========================================================
-  // GOOGLE RESPONSE
+  // GOOGLE LOGIN RESPONSE
   // =========================================================
 
   const handleGoogleResponse = async (response) => {
-    console.log(
-      "Google credential received"
-    );
+    console.log("Google credential received");
 
     if (!response?.credential) {
       setGoogleLoading(false);
@@ -300,7 +259,6 @@ const Login = () => {
       setTimeout(() => {
         redirectAfterLogin();
       }, 500);
-
     } catch (err) {
       console.error(
         "Google Login Error:",
@@ -326,19 +284,13 @@ const Login = () => {
         "VITE_GOOGLE_CLIENT_ID is missing."
       );
 
-      setError(
-        "Google Sign-In is not configured."
-      );
-
       return;
     }
 
     let cancelled = false;
 
     const initializeGoogle = () => {
-      if (cancelled) {
-        return;
-      }
+      if (cancelled) return;
 
       if (!window.google?.accounts?.id) {
         console.warn(
@@ -357,16 +309,10 @@ const Login = () => {
       }
 
       if (googleInitializedRef.current) {
-        console.log(
-          "Google Sign-In already initialized."
-        );
-
         return;
       }
 
       try {
-        googleInitializedRef.current = true;
-
         console.log(
           "Initializing Google Identity Services..."
         );
@@ -387,18 +333,24 @@ const Login = () => {
           googleButtonRef.current,
           {
             theme: "outline",
+
             size: "large",
+
             width: 400,
+
             text: "continue_with",
+
             shape: "rectangular",
+
             logo_alignment: "left",
           }
         );
 
+        googleInitializedRef.current = true;
+
         console.log(
           "Google Sign-In initialized successfully."
         );
-
       } catch (err) {
         console.error(
           "Google initialization error:",
@@ -423,10 +375,6 @@ const Login = () => {
       );
 
     if (existingScript) {
-      console.log(
-        "Google Identity script already exists."
-      );
-
       if (window.google?.accounts?.id) {
         initializeGoogle();
       } else {
@@ -447,12 +395,8 @@ const Login = () => {
     }
 
     // =======================================================
-    // CREATE GOOGLE SCRIPT
+    // LOAD GOOGLE SCRIPT
     // =======================================================
-
-    console.log(
-      "Loading Google Identity Services..."
-    );
 
     const script =
       document.createElement("script");
@@ -488,7 +432,6 @@ const Login = () => {
 
     return () => {
       cancelled = true;
-
       script.onload = null;
     };
   }, []);
@@ -520,10 +463,13 @@ const Login = () => {
         input:-webkit-autofill:focus,
         input:-webkit-autofill:active {
           -webkit-text-fill-color: #0f172a !important;
+
           -webkit-box-shadow:
             0 0 0 1000px #f8fafc inset !important;
+
           box-shadow:
             0 0 0 1000px #f8fafc inset !important;
+
           caret-color: #0f172a !important;
         }
 
@@ -532,10 +478,13 @@ const Login = () => {
         .dark input:-webkit-autofill:focus,
         .dark input:-webkit-autofill:active {
           -webkit-text-fill-color: #ffffff !important;
+
           -webkit-box-shadow:
             0 0 0 1000px #1e293b inset !important;
+
           box-shadow:
             0 0 0 1000px #1e293b inset !important;
+
           caret-color: #ffffff !important;
         }
 
@@ -553,13 +502,30 @@ const Login = () => {
             background-color 9999s ease-in-out 0s;
         }
 
-        /*
-          Google GIS iframe/button is placed over
-          our custom button.
-        */
-        .google-overlay iframe {
+        /* =====================================================
+           GOOGLE BUTTON
+        ===================================================== */
+
+        .google-login-container {
+          width: 100%;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          overflow: hidden;
+        }
+
+        .google-login-container > div {
           width: 100% !important;
-          height: 100% !important;
+        }
+
+        .google-login-container iframe {
+          max-width: 100% !important;
+        }
+
+        @media (max-width: 480px) {
+          .google-login-container iframe {
+            width: 100% !important;
+          }
         }
       `}</style>
 
@@ -645,9 +611,7 @@ const Login = () => {
             "
           />
 
-          <span>
-            Back to Home
-          </span>
+          <span>Back to Home</span>
         </Link>
       </div>
 
@@ -875,9 +839,7 @@ const Login = () => {
                     className="mt-0.5 shrink-0"
                   />
 
-                  <span>
-                    {error}
-                  </span>
+                  <span>{error}</span>
                 </div>
               )}
 
@@ -961,10 +923,7 @@ const Login = () => {
                       autoComplete="email"
                       value={email}
                       onChange={(e) => {
-                        setEmail(
-                          e.target.value
-                        );
-
+                        setEmail(e.target.value);
                         setError("");
                         setSuccess("");
                       }}
@@ -1147,7 +1106,7 @@ const Login = () => {
                 </div>
 
                 {/* =================================================
-                    SIGN IN
+                    SIGN IN BUTTON
                 ================================================= */}
 
                 <button
@@ -1257,102 +1216,47 @@ const Login = () => {
 
               <div className="w-full">
 
-                <div
-                  className="
-                    relative
-                    h-[50px]
-                    w-full
-                  "
-                >
-
-                  {/* -------------------------------------------
-                      CUSTOM GOOGLE BUTTON
-                  ------------------------------------------- */}
-
+                {googleLoading && (
                   <div
                     className="
-                      absolute
-                      inset-0
-                      z-10
+                      mb-3
                       flex
-                      w-full
                       items-center
                       justify-center
-                      gap-3
-                      rounded-xl
-                      border
-                      border-slate-200
-                      bg-white
-                      px-4
-                      py-3
+                      gap-2
                       text-sm
-                      font-semibold
-                      text-slate-700
-                      shadow-sm
-                      transition-all
-                      duration-200
-                      dark:border-slate-700
-                      dark:bg-slate-800
-                      dark:text-slate-200
+                      text-slate-500
+                      dark:text-slate-400
                     "
                   >
-
-                    {googleLoading ? (
-                      <>
-                        <span
-                          className="
-                            h-5
-                            w-5
-                            animate-spin
-                            rounded-full
-                            border-2
-                            border-slate-300
-                            border-t-indigo-600
-                            dark:border-slate-600
-                            dark:border-t-indigo-400
-                          "
-                        />
-
-                        <span>
-                          Signing in with Google...
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <GoogleIcon />
-
-                        <span>
-                          Continue with Google
-                        </span>
-                      </>
-                    )}
-
-                  </div>
-
-                  {/* -------------------------------------------
-                      REAL GOOGLE GIS BUTTON
-                  ------------------------------------------- */}
-
-                  <div
-                    className="
-                      google-overlay
-                      absolute
-                      inset-0
-                      z-20
-                      overflow-hidden
-                      opacity-0
-                    "
-                  >
-                    <div
-                      ref={googleButtonRef}
+                    <span
                       className="
-                        h-full
-                        w-full
+                        h-4
+                        w-4
+                        animate-spin
+                        rounded-full
+                        border-2
+                        border-slate-300
+                        border-t-indigo-600
+                        dark:border-slate-600
+                        dark:border-t-indigo-400
                       "
                     />
-                  </div>
 
-                </div>
+                    Signing in with Google...
+                  </div>
+                )}
+
+                {/* REAL GOOGLE BUTTON */}
+
+                <div
+                  ref={googleButtonRef}
+                  className="
+                    google-login-container
+                    min-h-[44px]
+                    w-full
+                  "
+                />
 
               </div>
 
@@ -1421,10 +1325,7 @@ const Login = () => {
           >
             <ShieldCheck
               size={14}
-              className="
-                shrink-0
-                text-emerald-500
-              "
+              className="shrink-0 text-emerald-500"
             />
 
             <span>
