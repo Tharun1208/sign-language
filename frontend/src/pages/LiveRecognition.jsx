@@ -1,2015 +1,778 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import Webcam from "react-webcam";
+import { motion, AnimatePresence } from "framer-motion";
+import { Volume2 } from "lucide-react";
+import AnimatedNumber from "../components/ui/AnimatedNumber";
+import { useToast } from "../components/ui/ToastProvider";
 
-import {
-  Camera,
-  Brain,
-  Activity,
-  Sparkles,
-  Radio,
-  ShieldCheck,
-  Play,
-  Square,
-  CameraIcon,
-  RotateCcw,
-  Zap,
-  Clock3,
-  CheckCircle2,
-  Gauge,
-  Cpu,
-  MonitorCheck,
-  AlertCircle,
-} from "lucide-react";
-
-import DashboardLayout from "../components/dashboard/DashboardLayout";
-
-const API_URL = import.meta.env.VITE_API_URL;
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 const LiveRecognition = () => {
   const webcamRef = useRef(null);
   const predictionLoopRef = useRef(null);
-  const firstPredictionTimeoutRef = useRef(null);
-
   const isProcessingRef = useRef(false);
-  const lastPredictionRef = useRef("");
-  const lastPredictionTimeRef = useRef(0);
+  const toast = useToast();
 
   const [isRunning, setIsRunning] = useState(false);
-  const [prediction, setPrediction] = useState("—");
+  const [currentLabel, setCurrentLabel] = useState("—");
   const [confidence, setConfidence] = useState(0);
-  const [fps, setFps] = useState(0);
   const [processingTime, setProcessingTime] = useState(0);
-  const [history, setHistory] = useState([]);
+  const [fps, setFps] = useState(0);
   const [error, setError] = useState("");
+  const [topPredictions, setTopPredictions] = useState([]);
 
-  // ============================================================
-  // PREDICT FRAME
-  // ============================================================
+  const predictionWindowRef = useRef([]);
+  const fpsCountRef = useRef(0);
+  const fpsTimeRef = useRef(0);
 
-  const predictFrame = async () => {
-    if (!webcamRef.current || isProcessingRef.current) {
-      return;
+  const [sentence, setSentence] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [aiSentence, setAiSentence] = useState("");
+  const [isRefining, setIsRefining] = useState(false);
+  const [aiCopied, setAiCopied] = useState(false);
+  const [aiNotice, setAiNotice] = useState("");
+  const [holdProgress, setHoldProgress] = useState(0);
+  const holdStartTimeRef = useRef(null);
+  const lastAppendedCharRef = useRef("");
+  const lastAppendTimeRef = useRef(0);
+
+  const [autoTTS, setAutoTTS] = useState(
+    () => localStorage.getItem("signai-auto-tts") === "true"
+  );
+  const [autoAppend, setAutoAppend] = useState(true);
+  const [minConfidenceThreshold, setMinConfidenceThreshold] = useState(
+    () => Number(localStorage.getItem("signai-conf-threshold")) || 65
+  );
+  const [holdDurationMs, setHoldDurationMs] = useState(
+    () => Number(localStorage.getItem("signai-hold-duration")) || 1200
+  );
+  const [showSettings, setShowSettings] = useState(false);
+  const [history, setHistory] = useState([]);
+
+  const speakText = useCallback((text) => {
+    if (!text || !("speechSynthesis" in window)) return;
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = Number(localStorage.getItem("signai-tts-rate")) || 1.0;
+      utterance.pitch = Number(localStorage.getItem("signai-tts-pitch")) || 1.0;
+      window.speechSynthesis.speak(utterance);
+    } catch (e) {
+      console.warn("TTS Error:", e);
     }
+  }, []);
+
+  const computeSmoothedPrediction = useCallback((rawLabel, rawConfidence) => {
+    const windowSize = 5;
+    const windowList = predictionWindowRef.current;
+
+    windowList.push({ label: rawLabel, confidence: rawConfidence });
+    if (windowList.length > windowSize) windowList.shift();
+
+    const counts = {};
+    const totalConf = {};
+
+    for (const item of windowList) {
+      if (item.label === "—" || item.label === "NO HAND") continue;
+      counts[item.label] = (counts[item.label] || 0) + 1;
+      totalConf[item.label] = (totalConf[item.label] || 0) + item.confidence;
+    }
+
+    let dominantLabel = rawLabel;
+    let maxCount = 0;
+    for (const label in counts) {
+      if (counts[label] > maxCount) {
+        maxCount = counts[label];
+        dominantLabel = label;
+      }
+    }
+
+    if (maxCount >= 3) {
+      return { label: dominantLabel, confidence: totalConf[dominantLabel] / maxCount };
+    }
+    return { label: rawLabel, confidence: rawConfidence };
+  }, []);
+
+  const handleHoldAndAppend = useCallback(
+    (detectedLabel, detectedConfidence) => {
+      if (!autoAppend || detectedLabel === "—" || detectedConfidence < minConfidenceThreshold) {
+        holdStartTimeRef.current = null;
+        setHoldProgress(0);
+        return;
+      }
+
+      const now = performance.now();
+
+      if (lastAppendedCharRef.current === detectedLabel && now - lastAppendTimeRef.current < 2000) {
+        setHoldProgress(0);
+        return;
+      }
+
+      if (!holdStartTimeRef.current) holdStartTimeRef.current = now;
+
+      const elapsed = now - holdStartTimeRef.current;
+      const progress = Math.min(100, (elapsed / holdDurationMs) * 100);
+      setHoldProgress(progress);
+
+      if (elapsed >= holdDurationMs) {
+        setSentence((prev) => prev + detectedLabel);
+        lastAppendedCharRef.current = detectedLabel;
+        lastAppendTimeRef.current = now;
+        holdStartTimeRef.current = null;
+        setHoldProgress(0);
+        if (autoTTS) speakText(detectedLabel);
+      }
+    },
+    [autoAppend, minConfidenceThreshold, holdDurationMs, autoTTS, speakText]
+  );
+
+  const predictFrame = useCallback(async () => {
+    if (!webcamRef.current || isProcessingRef.current) return;
 
     const imageSrc = webcamRef.current.getScreenshot();
-
-    if (!imageSrc) {
-      return;
-    }
+    if (!imageSrc) return;
 
     isProcessingRef.current = true;
-
     const startTime = performance.now();
 
     try {
       setError("");
-
-      // ========================================================
-      // BASE64 → BLOB
-      // ========================================================
-
       const imageResponse = await fetch(imageSrc);
-
-      if (!imageResponse.ok) {
-        throw new Error("Unable to convert webcam frame.");
-      }
-
       const blob = await imageResponse.blob();
 
-      // ========================================================
-      // FORM DATA
-      // ========================================================
-
       const formData = new FormData();
+      formData.append("frame", blob, `frame-${Date.now()}.jpg`);
 
-      formData.append(
-        "frame",
-        blob,
-        `frame-${Date.now()}.jpg`
-      );
-
-      // ========================================================
-      // SEND TO FLASK
-      // ========================================================
-
-      const apiResponse = await fetch(
-        `${API_URL}/api/predict/frame`,
-        {
-          method: "POST",
-          body: formData,
-        }
-      );
-
-      // ========================================================
-      // READ RESPONSE AS TEXT FIRST
-      // ========================================================
-
-      const responseText = await apiResponse.text();
-
-      let data;
-
-      try {
-        data = JSON.parse(responseText);
-      } catch (jsonError) {
-        console.error(
-          "Backend returned non-JSON response:",
-          responseText
-        );
-
-        if (apiResponse.status === 404) {
-          throw new Error(
-            `Prediction endpoint not found (404). React is requesting: ${API_URL}/api/predict/frame. Make sure Flask contains POST /api/predict/frame`
-          );
-        }
-
-        throw new Error(
-          `Backend returned invalid response (${apiResponse.status}).`
-        );
-      }
-
-      // ========================================================
-      // PROCESSING TIME
-      // ========================================================
+      const apiResponse = await fetch(`${API_URL}/api/predict/frame`, {
+        method: "POST",
+        body: formData,
+      });
 
       const endTime = performance.now();
+      setProcessingTime(Math.round(endTime - startTime));
 
-      const processing = Math.round(
-        endTime - startTime
-      );
+      fpsCountRef.current += 1;
+      if (endTime - fpsTimeRef.current >= 1000) {
+        setFps(fpsCountRef.current);
+        fpsCountRef.current = 0;
+        fpsTimeRef.current = endTime;
+      }
 
-      setProcessingTime(processing);
-
-      // ========================================================
-      // API ERROR
-      // ========================================================
-
-      if (!apiResponse.ok || !data.success) {
-        const message =
-          data.message || "Prediction failed.";
-
-        // ------------------------------------------------------
-        // NO HAND
-        // ------------------------------------------------------
-
-        if (
-          message
-            .toLowerCase()
-            .includes("no hand")
-        ) {
-          setPrediction("—");
-          setConfidence(0);
-          return;
-        }
-
-        setError(message);
+      if (!apiResponse.ok) {
+        setCurrentLabel("—");
+        setConfidence(0);
+        setHoldProgress(0);
+        holdStartTimeRef.current = null;
         return;
       }
 
-      // ========================================================
-      // GET PREDICTION
-      // ========================================================
+      const data = await apiResponse.json();
 
-      const result = data.prediction;
+      if (data.success) {
+        const rawLabel = (data.label || data.predicted_label || data.prediction || "—").toUpperCase();
+        const rawConf = Number(data.confidence_percent || 0);
 
-      if (!result) {
-        throw new Error(
-          "Backend response does not contain prediction data."
-        );
-      }
+        const smoothed = computeSmoothedPrediction(rawLabel, rawConf);
+        const finalLabel = smoothed.label;
+        const finalConfidence = Math.min(100, Math.max(0, Math.round(smoothed.confidence)));
 
-      const predictedLabel =
-        result.label ||
-        data.predicted_label ||
-        data.label ||
-        "—";
+        setCurrentLabel(finalLabel);
+        setConfidence(finalConfidence);
 
-      const predictedConfidence = Number(
-        result.confidence_percent ??
-          data.confidence_percent ??
-          0
-      );
-
-      // ========================================================
-      // UPDATE UI
-      // ========================================================
-
-      setPrediction(predictedLabel);
-
-      setConfidence(
-        Math.min(
-          100,
-          Math.max(0, predictedConfidence)
-        )
-      );
-
-      // ========================================================
-      // FPS
-      // ========================================================
-
-      const now = performance.now();
-
-      const previousTime =
-        lastPredictionTimeRef.current;
-
-      if (previousTime > 0) {
-        const difference =
-          now - previousTime;
-
-        if (difference > 0) {
-          const calculatedFps =
-            1000 / difference;
-
-          setFps(
-            Math.min(
-              Math.round(calculatedFps),
-              60
-            )
-          );
+        if (Array.isArray(data.top_predictions) && data.top_predictions.length > 0) {
+          setTopPredictions(data.top_predictions);
+        } else {
+          setTopPredictions([{ label: finalLabel, confidence_percent: finalConfidence }]);
         }
-      }
 
-      lastPredictionTimeRef.current = now;
+        if (finalLabel !== "—" && finalConfidence >= 50) {
+          setHistory((prev) => [
+            { id: `${Date.now()}-${Math.random()}`, label: finalLabel, confidence: finalConfidence, time: new Date().toLocaleTimeString() },
+            ...prev.slice(0, 19),
+          ]);
+        }
 
-      // ========================================================
-      // HISTORY
-      // ========================================================
-
-      const previousPrediction =
-        lastPredictionRef.current;
-
-      const predictionChanged =
-        previousPrediction !== predictedLabel;
-
-      if (predictionChanged) {
-        const historyItem = {
-          time: new Date().toLocaleTimeString(
-            "en-IN",
-            {
-              hour: "2-digit",
-              minute: "2-digit",
-              second: "2-digit",
-            }
-          ),
-
-          prediction: predictedLabel,
-
-          confidence: `${predictedConfidence.toFixed(
-            2
-          )}%`,
-        };
-
-        setHistory((prev) =>
-          [historyItem, ...prev].slice(0, 50)
-        );
-
-        lastPredictionRef.current =
-          predictedLabel;
+        handleHoldAndAppend(finalLabel, finalConfidence);
+      } else {
+        setCurrentLabel("—");
+        setConfidence(0);
+        setHoldProgress(0);
+        holdStartTimeRef.current = null;
       }
     } catch (err) {
-      console.error(
-        "Prediction request failed:",
-        err
-      );
-
-      setError(
-        err.message ||
-          "Unable to connect to SignAI backend."
-      );
+      console.warn("Prediction frame error:", err);
     } finally {
       isProcessingRef.current = false;
     }
-  };
-
-  // ============================================================
-  // START
-  // ============================================================
-
-  const handleStart = () => {
-    if (isRunning) {
-      return;
-    }
-
-    setError("");
-    setIsRunning(true);
-
-    lastPredictionRef.current = "";
-    lastPredictionTimeRef.current = 0;
-
-    // First prediction
-    firstPredictionTimeoutRef.current =
-      setTimeout(() => {
-        predictFrame();
-      }, 700);
-
-    // Prediction loop
-    predictionLoopRef.current =
-      setInterval(() => {
-        predictFrame();
-      }, 500);
-  };
-
-  // ============================================================
-  // STOP
-  // ============================================================
-
-  const handleStop = () => {
-    setIsRunning(false);
-
-    if (firstPredictionTimeoutRef.current) {
-      clearTimeout(
-        firstPredictionTimeoutRef.current
-      );
-
-      firstPredictionTimeoutRef.current = null;
-    }
-
-    if (predictionLoopRef.current) {
-      clearInterval(
-        predictionLoopRef.current
-      );
-
-      predictionLoopRef.current = null;
-    }
-
-    isProcessingRef.current = false;
-
-    setFps(0);
-    setProcessingTime(0);
-    setError("");
-  };
-
-  // ============================================================
-  // CAPTURE
-  // ============================================================
-
-  const handleCapture = () => {
-    if (
-      !webcamRef.current ||
-      !isRunning
-    ) {
-      return;
-    }
-
-    const imageSrc =
-      webcamRef.current.getScreenshot();
-
-    if (!imageSrc) {
-      console.error(
-        "Unable to capture webcam frame."
-      );
-
-      return;
-    }
-
-    const link =
-      document.createElement("a");
-
-    link.href = imageSrc;
-
-    link.download =
-      `sign-capture-${Date.now()}.jpg`;
-
-    document.body.appendChild(link);
-
-    link.click();
-
-    document.body.removeChild(link);
-  };
-
-  // ============================================================
-  // RESET
-  // ============================================================
-
-  const handleReset = () => {
-    handleStop();
-
-    setPrediction("—");
-    setConfidence(0);
-    setFps(0);
-    setProcessingTime(0);
-    setHistory([]);
-    setError("");
-
-    lastPredictionRef.current = "";
-    lastPredictionTimeRef.current = 0;
-  };
-
-  // ============================================================
-  // CLEANUP
-  // ============================================================
+  }, [computeSmoothedPrediction, handleHoldAndAppend]);
 
   useEffect(() => {
+    if (isRunning) {
+      fpsTimeRef.current = performance.now();
+      fpsCountRef.current = 0;
+      predictionLoopRef.current = setInterval(predictFrame, 200);
+    } else {
+      if (predictionLoopRef.current) clearInterval(predictionLoopRef.current);
+      holdStartTimeRef.current = null;
+    }
+
     return () => {
-      if (firstPredictionTimeoutRef.current) {
-        clearTimeout(
-          firstPredictionTimeoutRef.current
-        );
-      }
-
-      if (predictionLoopRef.current) {
-        clearInterval(
-          predictionLoopRef.current
-        );
-      }
+      if (predictionLoopRef.current) clearInterval(predictionLoopRef.current);
     };
-  }, []);
+  }, [isRunning, predictFrame]);
 
-  // ============================================================
-  // UI
-  // ============================================================
+  const refineWithGroq = useCallback(
+    async (textToRefine) => {
+      const raw = (textToRefine !== undefined ? textToRefine : sentence).trim();
+      if (!raw) {
+        toast.warn("Please assemble or sign some words first.");
+        return;
+      }
+
+      setIsRefining(true);
+      setAiNotice("");
+
+      try {
+        const response = await fetch(`${API_URL}/api/groq/refine`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: raw }),
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          setAiSentence(data.refined_sentence);
+          if (data.ai_generated) {
+            setAiNotice(data.model || "Groq LLaMA 3.3");
+            toast.success("Sentence refined with Groq AI.", "AI Translation");
+            if (autoTTS) speakText(data.refined_sentence);
+          } else {
+            setAiNotice(data.message || "Offline grammar correction applied");
+          }
+        } else {
+          throw new Error(data.message || "Failed to refine sentence.");
+        }
+      } catch (err) {
+        console.warn("Groq refinement error:", err);
+        const fallback =
+          raw.charAt(0).toUpperCase() +
+          raw.slice(1).toLowerCase() +
+          (/[.?!]$/.test(raw) ? "" : ".");
+        setAiSentence(fallback);
+        setAiNotice("Offline fallback mode active");
+      } finally {
+        setIsRefining(false);
+      }
+    },
+    [sentence, autoTTS, speakText, toast]
+  );
+
+  const addSpace = () => setSentence((prev) => prev + " ");
+  const handleBackspace = () => setSentence((prev) => prev.slice(0, -1));
+  const clearSentence = () => {
+    setSentence("");
+    setAiSentence("");
+    setAiNotice("");
+  };
+
+  const copySentence = async () => {
+    if (!sentence) return;
+    try {
+      await navigator.clipboard.writeText(sentence);
+      setCopied(true);
+      toast.success("Transcript copied to the clipboard.", "Copied");
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error("Clipboard access was blocked by the browser.");
+    }
+  };
+
+  const copyAiSentence = async () => {
+    if (!aiSentence) return;
+    try {
+      await navigator.clipboard.writeText(aiSentence);
+      setAiCopied(true);
+      toast.success("AI sentence copied to clipboard.", "Copied");
+      setTimeout(() => setAiCopied(false), 2000);
+    } catch {
+      toast.error("Failed to copy AI sentence.");
+    }
+  };
+
+  const downloadTranscript = () => {
+    if (!sentence) return;
+    const content = [
+      `SignAI Transcript`,
+      `Date: ${new Date().toLocaleString()}`,
+      `\n--- Recognized Signs (Deep Learning) ---`,
+      sentence,
+      aiSentence ? `\n--- AI Context Sentence (Groq LLM) ---\n${aiSentence}` : "",
+    ].filter(Boolean).join("\n");
+
+    const blob = new Blob([content], {
+      type: "text/plain;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `signai-transcript-${Date.now()}.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast.success("Transcript downloaded.", "Saved");
+  };
 
   return (
-    <DashboardLayout>
-      <div className="min-h-full space-y-8 pb-10">
-
-        {/* =====================================================
-            HEADER
-        ===================================================== */}
-
-        <section
-          className="
-            relative overflow-hidden rounded-3xl border
-            border-slate-200 bg-white p-6 shadow-sm
-            transition-all duration-300
-            hover:-translate-y-1
-            hover:border-indigo-200
-            hover:shadow-xl hover:shadow-indigo-500/5
-            dark:border-slate-800 dark:bg-slate-900
-            dark:hover:border-indigo-500/30
-            dark:hover:shadow-indigo-500/10
-            sm:p-8
-          "
-        >
-          <div
-            className="
-              pointer-events-none absolute -right-20 -top-24
-              h-64 w-64 rounded-full
-              bg-indigo-500/10 blur-3xl
-            "
-          />
-
-          <div
-            className="
-              pointer-events-none absolute -bottom-24
-              left-1/3 h-52 w-52 rounded-full
-              bg-blue-500/5 blur-3xl
-            "
-          />
-
-          <div
-            className="
-              relative flex flex-col gap-6
-              lg:flex-row lg:items-center
-              lg:justify-between
-            "
-          >
-            <div className="flex items-start gap-4">
-              <div
-                className="
-                  flex h-14 w-14 shrink-0
-                  items-center justify-center
-                  rounded-2xl border
-                  border-indigo-200
-                  bg-indigo-50
-                  text-indigo-600
-                  transition-all duration-300
-                  hover:scale-110
-                  hover:rotate-2
-                  hover:shadow-lg
-                  dark:border-indigo-500/20
-                  dark:bg-indigo-500/10
-                  dark:text-indigo-400
-                "
-              >
-                <Camera size={26} />
-              </div>
-
-              <div>
-                <div className="flex items-center gap-2">
-                  <h1
-                    className="
-                      text-2xl font-bold tracking-tight
-                      text-slate-900 dark:text-white
-                      sm:text-3xl
-                    "
-                  >
-                    Live Recognition
-                  </h1>
-
-                  <Sparkles
-                    size={18}
-                    className="
-                      hidden text-indigo-500
-                      dark:text-indigo-400 sm:block
-                    "
-                  />
-                </div>
-
-                <p
-                  className="
-                    mt-2 max-w-2xl text-sm leading-6
-                    text-slate-500 dark:text-slate-400
-                    sm:text-base
-                  "
-                >
-                  Detect and recognize sign language
-                  gestures in real time using your webcam
-                  and AI model.
-                </p>
-              </div>
-            </div>
-
-            {/* STATUS */}
-
-            <div
-              className={`
-                flex w-fit items-center gap-2.5
-                rounded-full border px-4 py-2.5
-                text-xs font-semibold
-                transition-all duration-300
-                ${
-                  isRunning
-                    ? `
-                      border-emerald-200
-                      bg-emerald-50
-                      text-emerald-700
-                      shadow-sm
-                      shadow-emerald-500/10
-                      dark:border-emerald-500/20
-                      dark:bg-emerald-500/10
-                      dark:text-emerald-400
-                    `
-                    : `
-                      border-slate-200
-                      bg-slate-50
-                      text-slate-600
-                      dark:border-slate-700
-                      dark:bg-slate-800
-                      dark:text-slate-300
-                    `
-                }
-              `}
-            >
-              <span className="relative flex h-2.5 w-2.5">
-                {isRunning && (
-                  <span
-                    className="
-                      absolute inline-flex h-full w-full
-                      animate-ping rounded-full
-                      bg-emerald-400 opacity-75
-                    "
-                  />
-                )}
-
-                <span
-                  className={`
-                    relative inline-flex h-2.5 w-2.5
-                    rounded-full
-                    ${
-                      isRunning
-                        ? "bg-emerald-500"
-                        : "bg-slate-400 dark:bg-slate-500"
-                    }
-                  `}
-                />
-              </span>
-
-              <Radio size={14} />
-
-              {isRunning
-                ? "Live System"
-                : "System Ready"}
-            </div>
-          </div>
-        </section>
-
-        {/* =====================================================
-            WORKSPACE
-        ===================================================== */}
-
-        <section>
-          <div className="mb-5 flex items-center gap-3">
-            <div
-              className="
-                flex h-10 w-10 items-center
-                justify-center rounded-xl
-                bg-slate-100 text-slate-600
-                transition-all duration-300
-                hover:scale-110
-                hover:bg-indigo-100
-                hover:text-indigo-600
-                dark:bg-slate-800
-                dark:text-slate-300
-                dark:hover:bg-indigo-500/10
-                dark:hover:text-indigo-400
-              "
-            >
-              <Activity size={19} />
-            </div>
-
-            <div>
-              <h2
-                className="
-                  text-lg font-semibold
-                  text-slate-900 dark:text-white
-                "
-              >
-                Recognition Workspace
-              </h2>
-
-              <p
-                className="
-                  mt-1 text-xs text-slate-500
-                  dark:text-slate-400
-                "
-              >
-                Monitor your camera and AI predictions
-                in real time.
-              </p>
-            </div>
-          </div>
-
-          <div
-            className="
-              grid grid-cols-1 gap-6
-              xl:grid-cols-3 xl:gap-7
-            "
-          >
-
-            {/* =================================================
-                CAMERA
-            ================================================= */}
-
-            <div
-              className="
-                min-w-0 overflow-hidden rounded-3xl
-                border border-slate-200 bg-white shadow-sm
-                transition-all duration-300
-                hover:-translate-y-1
-                hover:border-indigo-200
-                hover:shadow-xl hover:shadow-indigo-500/5
-                dark:border-slate-800 dark:bg-slate-900
-                dark:hover:border-indigo-500/30
-                dark:hover:shadow-indigo-500/10
-                xl:col-span-2
-              "
-            >
-              <div
-                className="
-                  flex flex-col gap-3 border-b
-                  border-slate-200 px-5 py-4
-                  dark:border-slate-800
-                  sm:flex-row sm:items-center
-                  sm:justify-between
-                "
-              >
-                <div className="flex items-center gap-3">
-                  <div
-                    className="
-                      flex h-10 w-10 items-center
-                      justify-center rounded-xl
-                      bg-indigo-50 text-indigo-600
-                      transition-all duration-300
-                      hover:scale-110
-                      hover:rotate-2
-                      hover:shadow-md
-                      dark:bg-indigo-500/10
-                      dark:text-indigo-400
-                    "
-                  >
-                    <Camera size={19} />
-                  </div>
-
-                  <div>
-                    <h3
-                      className="
-                        text-sm font-semibold
-                        text-slate-900 dark:text-white
-                      "
-                    >
-                      Live Camera
-                    </h3>
-
-                    <p
-                      className="
-                        text-xs text-slate-500
-                        dark:text-slate-400
-                      "
-                    >
-                      Real-time gesture capture
-                    </p>
-                  </div>
-                </div>
-
-                <div
-                  className={`
-                    flex w-fit items-center gap-2
-                    rounded-full px-3 py-1.5
-                    text-xs font-semibold
-                    transition-all duration-300
-                    ${
-                      isRunning
-                        ? `
-                          bg-emerald-50
-                          text-emerald-700
-                          dark:bg-emerald-500/10
-                          dark:text-emerald-400
-                        `
-                        : `
-                          bg-slate-100
-                          text-slate-600
-                          dark:bg-slate-800
-                          dark:text-slate-300
-                        `
-                    }
-                  `}
-                >
-                  <span
-                    className={`
-                      h-2 w-2 rounded-full
-                      ${
-                        isRunning
-                          ? "animate-pulse bg-emerald-500"
-                          : "bg-slate-400"
-                      }
-                    `}
-                  />
-
-                  {isRunning
-                    ? "Detecting"
-                    : "Ready"}
-                </div>
-              </div>
-
-              {/* CAMERA */}
-
-              <div
-                className="
-                  relative min-h-[390px]
-                  bg-slate-950 p-4
-                  transition-all duration-300
-                  hover:bg-slate-900
-                  sm:p-6
-                "
-              >
-                <div
-                  className="
-                    relative mx-auto flex min-h-[350px]
-                    w-full max-w-4xl items-center
-                    justify-center overflow-hidden
-                    rounded-2xl border border-slate-700
-                    bg-black shadow-2xl
-                    transition-all duration-300
-                    hover:border-indigo-500/60
-                    hover:shadow-[0_0_40px_rgba(99,102,241,0.15)]
-                  "
-                >
-                  <Webcam
-                    ref={webcamRef}
-                    audio={false}
-                    mirrored
-                    screenshotFormat="image/jpeg"
-                    screenshotQuality={0.85}
-                    videoConstraints={{
-                      width: 1280,
-                      height: 720,
-                      facingMode: "user",
-                    }}
-                    className={`
-                      h-full min-h-[350px]
-                      w-full object-cover
-                      transition-opacity duration-500
-                      ${
-                        isRunning
-                          ? "opacity-100"
-                          : "opacity-60"
-                      }
-                    `}
-                  />
-
-                  {/* DETECTION FRAME */}
-
-                  <div
-                    className="
-                      pointer-events-none
-                      absolute inset-[12%]
-                      rounded-2xl border-2
-                      border-indigo-400/80
-                      shadow-[0_0_30px_rgba(99,102,241,0.15)]
-                      transition-all duration-500
-                    "
-                  >
-                    <span
-                      className="
-                        absolute -left-1 -top-1
-                        h-8 w-8
-                        border-l-4 border-t-4
-                        border-indigo-400
-                      "
-                    />
-
-                    <span
-                      className="
-                        absolute -right-1 -top-1
-                        h-8 w-8
-                        border-r-4 border-t-4
-                        border-indigo-400
-                      "
-                    />
-
-                    <span
-                      className="
-                        absolute -bottom-1 -left-1
-                        h-8 w-8
-                        border-b-4 border-l-4
-                        border-indigo-400
-                      "
-                    />
-
-                    <span
-                      className="
-                        absolute -bottom-1 -right-1
-                        h-8 w-8
-                        border-b-4 border-r-4
-                        border-indigo-400
-                      "
-                    />
-                  </div>
-
-                  {/* CAMERA ICON */}
-
-                  <div
-                    className="
-                      absolute right-4 top-4
-                      flex h-10 w-10 items-center
-                      justify-center rounded-xl
-                      bg-black/50 text-white
-                      backdrop-blur-md
-                      transition-all duration-300
-                      hover:scale-110
-                      hover:bg-indigo-500/70
-                    "
-                  >
-                    <CameraIcon size={18} />
-                  </div>
-
-                  {/* READY */}
-
-                  {!isRunning && (
-                    <div
-                      className="
-                        absolute inset-0 flex items-center
-                        justify-center bg-black/30
-                        backdrop-blur-[2px]
-                      "
-                    >
-                      <div
-                        className="
-                          rounded-2xl border
-                          border-white/10
-                          bg-black/50 px-6 py-5
-                          text-center text-white
-                          backdrop-blur-xl
-                          transition-all duration-300
-                          hover:scale-105
-                          hover:border-indigo-400/30
-                          hover:bg-black/60
-                        "
-                      >
-                        <div
-                          className="
-                            mx-auto flex h-12 w-12
-                            items-center justify-center
-                            rounded-xl
-                            bg-indigo-500/20
-                            text-indigo-300
-                            transition-transform duration-300
-                            hover:scale-110
-                          "
-                        >
-                          <Camera size={23} />
-                        </div>
-
-                        <p className="mt-3 text-sm font-semibold">
-                          Camera Ready
-                        </p>
-
-                        <p className="mt-1 text-xs text-slate-300">
-                          Start recognition to begin detection
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* =================================================
-                PREDICTION
-            ================================================= */}
-
-            <div
-              className="
-                min-w-0 overflow-hidden rounded-3xl
-                border border-slate-200 bg-white shadow-sm
-                transition-all duration-300
-                hover:-translate-y-1
-                hover:border-purple-200
-                hover:shadow-xl hover:shadow-purple-500/5
-                dark:border-slate-800 dark:bg-slate-900
-                dark:hover:border-purple-500/30
-                dark:hover:shadow-purple-500/10
-              "
-            >
-              <div
-                className="
-                  flex items-center gap-3 border-b
-                  border-slate-200 px-5 py-4
-                  dark:border-slate-800
-                "
-              >
-                <div
-                  className="
-                    flex h-10 w-10 items-center
-                    justify-center rounded-xl
-                    bg-purple-50 text-purple-600
-                    transition-all duration-300
-                    hover:scale-110
-                    hover:rotate-2
-                    hover:shadow-md
-                    dark:bg-purple-500/10
-                    dark:text-purple-400
-                  "
-                >
-                  <Brain size={19} />
-                </div>
-
-                <div>
-                  <h3
-                    className="
-                      text-sm font-semibold
-                      text-slate-900 dark:text-white
-                    "
-                  >
-                    AI Prediction
-                  </h3>
-
-                  <p
-                    className="
-                      text-xs text-slate-500
-                      dark:text-slate-400
-                    "
-                  >
-                    Current recognition result
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex min-h-[390px] flex-col p-6">
-                <div
-                  className="
-                    flex flex-1 flex-col
-                    items-center justify-center
-                  "
-                >
-                  <div
-                    className="
-                      relative flex h-36 w-36
-                      items-center justify-center
-                      rounded-[2rem]
-                      border border-indigo-200
-                      bg-indigo-50
-                      text-6xl font-black
-                      text-indigo-600
-                      transition-all duration-300
-                      hover:scale-105
-                      hover:border-indigo-400
-                      hover:shadow-[0_0_35px_rgba(99,102,241,0.25)]
-                      dark:border-indigo-500/20
-                      dark:bg-indigo-500/10
-                      dark:text-indigo-400
-                      dark:hover:border-indigo-400/40
-                    "
-                  >
-                    {prediction}
-
-                    {isRunning &&
-                      prediction !== "—" && (
-                        <span
-                          className="
-                            absolute -right-2 -top-2
-                            flex h-7 w-7
-                            items-center justify-center
-                            rounded-full border-4
-                            border-white bg-emerald-500
-                            dark:border-slate-900
-                          "
-                        >
-                          <CheckCircle2
-                            size={14}
-                            className="text-white"
-                          />
-                        </span>
-                      )}
-                  </div>
-
-                  <p
-                    className="
-                      mt-5 text-base font-semibold
-                      text-slate-900 dark:text-white
-                    "
-                  >
-                    {prediction !== "—"
-                      ? "Detected Gesture"
-                      : "No Prediction"}
-                  </p>
-
-                  <p
-                    className="
-                      mt-1 text-center text-xs
-                      text-slate-500
-                      dark:text-slate-400
-                    "
-                  >
-                    {isRunning
-                      ? prediction !== "—"
-                        ? "AI model is analyzing the camera feed."
-                        : "Place your hand inside the detection frame."
-                      : "Start recognition to begin detection."}
-                  </p>
-
-                  {/* ERROR */}
-
-                  {error && (
-                    <div
-                      className="
-                        mt-4 flex max-w-xs
-                        items-start gap-2
-                        rounded-xl border
-                        border-red-200
-                        bg-red-50 px-3 py-3
-                        text-xs text-red-600
-                        transition-all duration-300
-                        hover:border-red-300
-                        hover:shadow-md
-                        dark:border-red-500/20
-                        dark:bg-red-500/10
-                        dark:text-red-400
-                      "
-                    >
-                      <AlertCircle
-                        size={15}
-                        className="mt-0.5 shrink-0"
-                      />
-
-                      <span>{error}</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* CONFIDENCE */}
-
-                <div
-                  className="
-                    rounded-2xl border
-                    border-slate-200
-                    bg-slate-50 p-4
-                    transition-all duration-300
-                    hover:-translate-y-1
-                    hover:border-indigo-200
-                    hover:shadow-md
-                    dark:border-slate-800
-                    dark:bg-slate-950
-                    dark:hover:border-indigo-500/30
-                  "
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Gauge
-                        size={16}
-                        className="
-                          text-indigo-500
-                          dark:text-indigo-400
-                        "
-                      />
-
-                      <span
-                        className="
-                          text-xs font-medium
-                          text-slate-500
-                          dark:text-slate-400
-                        "
-                      >
-                        Confidence
-                      </span>
-                    </div>
-
-                    <span
-                      className="
-                        text-sm font-bold
-                        text-slate-900
-                        dark:text-white
-                      "
-                    >
-                      {confidence.toFixed(2)}%
-                    </span>
-                  </div>
-
-                  <div
-                    className="
-                      mt-3 h-2.5 overflow-hidden
-                      rounded-full bg-slate-200
-                      dark:bg-slate-800
-                    "
-                  >
-                    <div
-                      className="
-                        h-full rounded-full
-                        bg-gradient-to-r
-                        from-indigo-500
-                        to-emerald-500
-                        transition-all duration-500
-                      "
-                      style={{
-                        width: `${Math.min(
-                          Math.max(confidence, 0),
-                          100
-                        )}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-
-                {/* STATS */}
-
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  {/* FPS */}
-
-                  <div
-                    className="
-                      rounded-xl border
-                      border-slate-200
-                      bg-slate-50 p-3
-                      transition-all duration-300
-                      hover:-translate-y-1
-                      hover:border-indigo-200
-                      hover:bg-indigo-50/50
-                      hover:shadow-md
-                      dark:border-slate-800
-                      dark:bg-slate-950
-                      dark:hover:border-indigo-500/30
-                      dark:hover:bg-indigo-500/5
-                    "
-                  >
-                    <div className="flex items-center gap-2">
-                      <Zap
-                        size={14}
-                        className="text-amber-500"
-                      />
-
-                      <span
-                        className="
-                          text-[11px]
-                          text-slate-500
-                          dark:text-slate-400
-                        "
-                      >
-                        FPS
-                      </span>
-                    </div>
-
-                    <p
-                      className="
-                        mt-1 text-lg font-bold
-                        text-slate-900
-                        dark:text-white
-                      "
-                    >
-                      {fps}
-                    </p>
-                  </div>
-
-                  {/* PROCESSING */}
-
-                  <div
-                    className="
-                      rounded-xl border
-                      border-slate-200
-                      bg-slate-50 p-3
-                      transition-all duration-300
-                      hover:-translate-y-1
-                      hover:border-indigo-200
-                      hover:bg-indigo-50/50
-                      hover:shadow-md
-                      dark:border-slate-800
-                      dark:bg-slate-950
-                      dark:hover:border-indigo-500/30
-                      dark:hover:bg-indigo-500/5
-                    "
-                  >
-                    <div className="flex items-center gap-2">
-                      <Clock3
-                        size={14}
-                        className="text-blue-500"
-                      />
-
-                      <span
-                        className="
-                          text-[11px]
-                          text-slate-500
-                          dark:text-slate-400
-                        "
-                      >
-                        Processing
-                      </span>
-                    </div>
-
-                    <p
-                      className="
-                        mt-1 text-lg font-bold
-                        text-slate-900
-                        dark:text-white
-                      "
-                    >
-                      {processingTime} ms
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* =====================================================
-            CONTROLS
-        ===================================================== */}
-
-        <section>
-          <div className="mb-5">
-            <h2
-              className="
-                text-lg font-semibold
-                text-slate-900 dark:text-white
-              "
-            >
-              Recognition Controls
-            </h2>
-
-            <p
-              className="
-                mt-1 text-sm
-                text-slate-500
-                dark:text-slate-400
-              "
-            >
-              Manage your live recognition session.
+    <>
+      <div className="stack" style={{ gap: "var(--space-6)", paddingBottom: "var(--space-8)" }}>
+        <div className="page-head">
+          <div>
+            <span className="eyebrow">Live workspace</span>
+            <h1 className="mt-2">Live detection</h1>
+            <p style={{ maxWidth: "62ch" }}>
+              Webcam gesture translation with smoothing, voice synthesis and a
+              sentence builder. Hold a sign steady to lock it in.
             </p>
           </div>
 
-          <div
-            className="
-              rounded-3xl border
-              border-slate-200
-              bg-white p-5 shadow-sm
-              transition-all duration-300
-              hover:-translate-y-1
-              hover:border-indigo-200
-              hover:shadow-xl hover:shadow-indigo-500/5
-              dark:border-slate-800
-              dark:bg-slate-900
-              dark:hover:border-indigo-500/30
-              sm:p-6
-            "
-          >
-            <div className="flex flex-wrap gap-3 sm:gap-4">
-              {/* START */}
-
-              <button
-                type="button"
-                onClick={handleStart}
-                disabled={isRunning}
-                className="
-                  inline-flex items-center
-                  justify-center gap-2.5
-                  rounded-xl bg-emerald-600
-                  px-5 py-3 text-sm
-                  font-semibold text-white
-                  transition-all duration-200
-                  hover:-translate-y-0.5
-                  hover:bg-emerald-700
-                  hover:shadow-lg
-                  hover:shadow-emerald-500/20
-                  active:translate-y-0
-                  disabled:cursor-not-allowed
-                  disabled:opacity-50
-                  dark:bg-emerald-500
-                  dark:hover:bg-emerald-400
-                "
-              >
-                <Play
-                  size={16}
-                  fill="currentColor"
-                />
-
-                {isRunning
-                  ? "Running"
-                  : "Start"}
-              </button>
-
-              {/* STOP */}
-
-              <button
-                type="button"
-                onClick={handleStop}
-                disabled={!isRunning}
-                className="
-                  inline-flex items-center
-                  justify-center gap-2.5
-                  rounded-xl bg-red-600
-                  px-5 py-3 text-sm
-                  font-semibold text-white
-                  transition-all duration-200
-                  hover:-translate-y-0.5
-                  hover:bg-red-700
-                  hover:shadow-lg
-                  hover:shadow-red-500/20
-                  active:translate-y-0
-                  disabled:cursor-not-allowed
-                  disabled:opacity-50
-                  dark:bg-red-500
-                  dark:hover:bg-red-400
-                "
-              >
-                <Square
-                  size={16}
-                  fill="currentColor"
-                />
-
-                Stop
-              </button>
-
-              {/* CAPTURE */}
-
-              <button
-                type="button"
-                onClick={handleCapture}
-                disabled={!isRunning}
-                className="
-                  inline-flex items-center
-                  justify-center gap-2.5
-                  rounded-xl bg-blue-600
-                  px-5 py-3 text-sm
-                  font-semibold text-white
-                  transition-all duration-200
-                  hover:-translate-y-0.5
-                  hover:bg-blue-700
-                  hover:shadow-lg
-                  hover:shadow-blue-500/20
-                  active:translate-y-0
-                  disabled:cursor-not-allowed
-                  disabled:opacity-50
-                  dark:bg-blue-500
-                  dark:hover:bg-blue-400
-                "
-              >
-                <CameraIcon size={17} />
-
-                Capture
-              </button>
-
-              {/* RESET */}
-
-              <button
-                type="button"
-                onClick={handleReset}
-                className="
-                  inline-flex items-center
-                  justify-center gap-2.5
-                  rounded-xl bg-violet-600
-                  px-5 py-3 text-sm
-                  font-semibold text-white
-                  transition-all duration-200
-                  hover:-translate-y-0.5
-                  hover:bg-violet-700
-                  hover:shadow-lg
-                  hover:shadow-violet-500/20
-                  active:translate-y-0
-                  dark:bg-violet-500
-                  dark:hover:bg-violet-400
-                "
-              >
-                <RotateCcw size={17} />
-
-                Reset
-              </button>
-            </div>
+          <div className="row">
+            <button
+              onClick={() => setShowSettings((prev) => !prev)}
+              className={`btn btn-sm ${showSettings ? "btn-secondary" : "btn-ghost"}`}
+            >
+              {showSettings ? "Hide settings" : "Settings"}
+            </button>
+            <button
+              onClick={() => setAutoTTS((prev) => !prev)}
+              className={`btn btn-sm ${autoTTS ? "btn-secondary" : "btn-ghost"}`}
+            >
+              {autoTTS ? "Auto-TTS on" : "Auto-TTS off"}
+            </button>
           </div>
-        </section>
+        </div>
 
-        {/* =====================================================
-            ANALYTICS
-        ===================================================== */}
-
-        <section>
-          <div className="mb-5 flex items-center gap-3">
-            <div
-              className="
-                flex h-10 w-10 items-center
-                justify-center rounded-xl
-                bg-indigo-50 text-indigo-600
-                transition-all duration-300
-                hover:scale-110
-                hover:rotate-2
-                hover:shadow-md
-                dark:bg-indigo-500/10
-                dark:text-indigo-400
-              "
+        <AnimatePresence>
+          {showSettings && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+              style={{ overflow: "hidden" }}
             >
-              <Activity size={19} />
-            </div>
-
-            <div>
-              <h2
-                className="
-                  text-lg font-semibold
-                  text-slate-900
-                  dark:text-white
-                "
-              >
-                Recognition Analytics
-              </h2>
-
-              <p
-                className="
-                  mt-1 text-xs
-                  text-slate-500
-                  dark:text-slate-400
-                "
-              >
-                Prediction history and system performance.
-              </p>
-            </div>
-          </div>
-
-          <div
-            className="
-              grid grid-cols-1 gap-6
-              lg:grid-cols-2
-            "
-          >
-            {/* HISTORY */}
-
-            <div
-              className="
-                min-w-0 overflow-hidden
-                rounded-3xl border
-                border-slate-200
-                bg-white shadow-sm
-                transition-all duration-300
-                hover:-translate-y-1
-                hover:border-indigo-200
-                hover:shadow-xl
-                hover:shadow-indigo-500/5
-                dark:border-slate-800
-                dark:bg-slate-900
-                dark:hover:border-indigo-500/30
-              "
-            >
-              <div
-                className="
-                  border-b
-                  border-slate-200
-                  px-5 py-4
-                  dark:border-slate-800
-                "
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3
-                      className="
-                        text-sm font-semibold
-                        text-slate-900
-                        dark:text-white
-                      "
-                    >
-                      Recent Predictions
-                    </h3>
-
-                    <p
-                      className="
-                        mt-1 text-xs
-                        text-slate-500
-                        dark:text-slate-400
-                      "
-                    >
-                      Latest recognition results
-                    </p>
-                  </div>
-
-                  <div
-                    className="
-                      flex h-9 w-9 items-center
-                      justify-center rounded-xl
-                      bg-indigo-50
-                      text-indigo-600
-                      transition-all duration-300
-                      hover:scale-110
-                      hover:rotate-2
-                      hover:shadow-md
-                      dark:bg-indigo-500/10
-                      dark:text-indigo-400
-                    "
-                  >
-                    <Brain size={17} />
-                  </div>
-                </div>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table
-                  className="
-                    w-full min-w-[420px]
-                    text-left
-                  "
-                >
-                  <thead>
-                    <tr
-                      className="
-                        border-b
-                        border-slate-200
-                        dark:border-slate-800
-                      "
-                    >
-                      <th
-                        className="
-                          px-5 py-3
-                          text-xs font-semibold
-                          uppercase tracking-wider
-                          text-slate-500
-                          dark:text-slate-400
-                        "
-                      >
-                        Time
-                      </th>
-
-                      <th
-                        className="
-                          px-5 py-3
-                          text-xs font-semibold
-                          uppercase tracking-wider
-                          text-slate-500
-                          dark:text-slate-400
-                        "
-                      >
-                        Sign
-                      </th>
-
-                      <th
-                        className="
-                          px-5 py-3
-                          text-xs font-semibold
-                          uppercase tracking-wider
-                          text-slate-500
-                          dark:text-slate-400
-                        "
-                      >
-                        Confidence
-                      </th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {history.length === 0 ? (
-                      <tr>
-                        <td
-                          colSpan="3"
-                          className="
-                            px-5 py-12
-                            text-center text-sm
-                            text-slate-500
-                            dark:text-slate-400
-                          "
-                        >
-                          No predictions yet.
-                        </td>
-                      </tr>
-                    ) : (
-                      history.map(
-                        (item, index) => (
-                          <tr
-                            key={`${item.time}-${index}`}
-                            className="
-                              border-b
-                              border-slate-100
-                              transition-all duration-200
-                              hover:bg-indigo-50/60
-                              dark:border-slate-800
-                              dark:hover:bg-indigo-500/5
-                            "
-                          >
-                            <td
-                              className="
-                                px-5 py-4 text-sm
-                                text-slate-500
-                                dark:text-slate-400
-                              "
-                            >
-                              {item.time}
-                            </td>
-
-                            <td
-                              className="
-                                px-5 py-4 text-sm
-                                font-bold
-                                text-indigo-600
-                                transition-colors duration-200
-                                dark:text-indigo-400
-                              "
-                            >
-                              {item.prediction}
-                            </td>
-
-                            <td
-                              className="
-                                px-5 py-4 text-sm
-                                font-semibold
-                                text-emerald-600
-                                dark:text-emerald-400
-                              "
-                            >
-                              {item.confidence}
-                            </td>
-                          </tr>
-                        )
-                      )
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* SYSTEM STATS */}
-
-            <div
-              className="
-                min-w-0 overflow-hidden
-                rounded-3xl border
-                border-slate-200
-                bg-white shadow-sm
-                transition-all duration-300
-                hover:-translate-y-1
-                hover:border-emerald-200
-                hover:shadow-xl
-                hover:shadow-emerald-500/5
-                dark:border-slate-800
-                dark:bg-slate-900
-                dark:hover:border-emerald-500/30
-              "
-            >
-              <div
-                className="
-                  flex items-center
-                  justify-between
-                  border-b
-                  border-slate-200
-                  px-5 py-4
-                  dark:border-slate-800
-                "
-              >
-                <div className="flex items-center gap-3">
-                  <div
-                    className="
-                      flex h-10 w-10
-                      items-center
-                      justify-center
-                      rounded-xl
-                      bg-emerald-50
-                      text-emerald-600
-                      transition-all duration-300
-                      hover:scale-110
-                      hover:rotate-2
-                      hover:shadow-md
-                      dark:bg-emerald-500/10
-                      dark:text-emerald-400
-                    "
-                  >
-                    <ShieldCheck size={19} />
-                  </div>
-
-                  <div>
-                    <h3
-                      className="
-                        text-sm font-semibold
-                        text-slate-900
-                        dark:text-white
-                      "
-                    >
-                      System Statistics
-                    </h3>
-
-                    <p
-                      className="
-                        text-xs
-                        text-slate-500
-                        dark:text-slate-400
-                      "
-                    >
-                      Current recognition performance
-                    </p>
-                  </div>
+              <div className="card glass grid grid-3" style={{ alignItems: "start" }}>
+                <div className="field" style={{ marginBottom: 0 }}>
+                  <label className="label" htmlFor="live-confidence">
+                    Min confidence filter: {minConfidenceThreshold}%
+                  </label>
+                  <input
+                    id="live-confidence"
+                    type="range"
+                    min="50"
+                    max="95"
+                    value={minConfidenceThreshold}
+                    onChange={(e) => setMinConfidenceThreshold(Number(e.target.value))}
+                    className="slider"
+                  />
+                  <span className="hint">Ignore predictions below this confidence</span>
                 </div>
 
-                <Cpu
-                  size={20}
-                  className="
-                    text-slate-400
-                    transition-transform duration-300
-                    hover:rotate-12 hover:scale-110
-                    dark:text-slate-500
-                  "
-                />
-              </div>
-
-              <div
-                className="
-                  grid grid-cols-2 gap-4 p-5
-                "
-              >
-                {/* ACCURACY */}
-
-                <div
-                  className="
-                    rounded-2xl border
-                    border-slate-200
-                    bg-slate-50 p-4
-                    transition-all duration-300
-                    hover:-translate-y-1
-                    hover:border-emerald-200
-                    hover:shadow-lg
-                    hover:shadow-emerald-500/5
-                    dark:border-slate-800
-                    dark:bg-slate-950
-                    dark:hover:border-emerald-500/30
-                  "
-                >
-                  <div className="flex items-center justify-between">
-                    <p
-                      className="
-                        text-xs
-                        text-slate-500
-                        dark:text-slate-400
-                      "
-                    >
-                      Confidence
-                    </p>
-
-                    <MonitorCheck
-                      size={15}
-                      className="
-                        text-emerald-500
-                        transition-transform duration-300
-                        hover:scale-125
-                      "
-                    />
-                  </div>
-
-                  <p
-                    className="
-                      mt-2 text-2xl font-bold
-                      text-slate-900
-                      dark:text-white
-                    "
-                  >
-                    {confidence > 0
-                      ? `${confidence.toFixed(2)}%`
-                      : "0%"}
-                  </p>
-                </div>
-
-                {/* FPS */}
-
-                <div
-                  className="
-                    rounded-2xl border
-                    border-slate-200
-                    bg-slate-50 p-4
-                    transition-all duration-300
-                    hover:-translate-y-1
-                    hover:border-amber-200
-                    hover:shadow-lg
-                    hover:shadow-amber-500/5
-                    dark:border-slate-800
-                    dark:bg-slate-950
-                    dark:hover:border-amber-500/30
-                  "
-                >
-                  <div className="flex items-center justify-between">
-                    <p
-                      className="
-                        text-xs
-                        text-slate-500
-                        dark:text-slate-400
-                      "
-                    >
-                      FPS
-                    </p>
-
-                    <Zap
-                      size={15}
-                      className="
-                        text-amber-500
-                        transition-transform duration-300
-                        hover:scale-125
-                      "
-                    />
-                  </div>
-
-                  <p
-                    className="
-                      mt-2 text-2xl font-bold
-                      text-slate-900
-                      dark:text-white
-                    "
-                  >
-                    {fps}
-                  </p>
-                </div>
-
-                {/* PREDICTIONS */}
-
-                <div
-                  className="
-                    rounded-2xl border
-                    border-slate-200
-                    bg-slate-50 p-4
-                    transition-all duration-300
-                    hover:-translate-y-1
-                    hover:border-indigo-200
-                    hover:shadow-lg
-                    hover:shadow-indigo-500/5
-                    dark:border-slate-800
-                    dark:bg-slate-950
-                    dark:hover:border-indigo-500/30
-                  "
-                >
-                  <div className="flex items-center justify-between">
-                    <p
-                      className="
-                        text-xs
-                        text-slate-500
-                        dark:text-slate-400
-                      "
-                    >
-                      Predictions
-                    </p>
-
-                    <Brain
-                      size={15}
-                      className="
-                        text-indigo-500
-                        transition-transform duration-300
-                        hover:scale-125
-                      "
-                    />
-                  </div>
-
-                  <p
-                    className="
-                      mt-2 text-2xl font-bold
-                      text-slate-900
-                      dark:text-white
-                    "
-                  >
-                    {history.length}
-                  </p>
-                </div>
-
-                {/* STATUS */}
-
-                <div
-                  className="
-                    rounded-2xl border
-                    border-slate-200
-                    bg-slate-50 p-4
-                    transition-all duration-300
-                    hover:-translate-y-1
-                    hover:border-blue-200
-                    hover:shadow-lg
-                    dark:border-slate-800
-                    dark:bg-slate-950
-                    dark:hover:border-blue-500/30
-                  "
-                >
-                  <p
-                    className="
-                      text-xs
-                      text-slate-500
-                      dark:text-slate-400
-                    "
-                  >
-                    Status
-                  </p>
-
-                  <div className="mt-2 flex items-center gap-2">
-                    <span
-                      className={`
-                        h-2 w-2 rounded-full
-                        ${
-                          isRunning
-                            ? "animate-pulse bg-emerald-500"
-                            : "bg-slate-400"
-                        }
-                      `}
-                    />
-
-                    <p
-                      className={`
-                        text-sm font-bold
-                        ${
-                          isRunning
-                            ? `
-                              text-emerald-600
-                              dark:text-emerald-400
-                            `
-                            : `
-                              text-slate-600
-                              dark:text-slate-300
-                            `
-                        }
-                      `}
-                    >
-                      {isRunning
-                        ? "Detecting"
-                        : "Ready"}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* MODEL */}
-
-              <div
-                className="
-                  mx-5 mb-5 flex
-                  items-center gap-3
-                  rounded-2xl border
-                  border-slate-200
-                  bg-slate-50 p-4
-                  transition-all duration-300
-                  hover:-translate-y-1
-                  hover:border-indigo-200
-                  hover:shadow-lg
-                  dark:border-slate-800
-                  dark:bg-slate-950
-                  dark:hover:border-indigo-500/30
-                "
-              >
-                <div
-                  className="
-                    flex h-9 w-9
-                    items-center
-                    justify-center
-                    rounded-xl
-                    bg-indigo-50
-                    text-indigo-600
-                    transition-all duration-300
-                    hover:scale-110
-                    hover:rotate-2
-                    dark:bg-indigo-500/10
-                    dark:text-indigo-400
-                  "
-                >
-                  <Cpu size={17} />
+                <div className="field" style={{ marginBottom: 0 }}>
+                  <label className="label" htmlFor="live-hold">
+                    Hold-to-append duration: {holdDurationMs / 1000}s
+                  </label>
+                  <input
+                    id="live-hold"
+                    type="range"
+                    min="800"
+                    max="2500"
+                    step="100"
+                    value={holdDurationMs}
+                    onChange={(e) => setHoldDurationMs(Number(e.target.value))}
+                    className="slider"
+                  />
+                  <span className="hint">Time to hold before appending to the sentence</span>
                 </div>
 
                 <div>
-                  <p
-                    className="
-                      text-xs
-                      text-slate-500
-                      dark:text-slate-400
-                    "
-                  >
-                    AI Model
-                  </p>
-
-                  <p
-                    className="
-                      mt-0.5 text-sm
-                      font-semibold
-                      text-slate-900
-                      dark:text-white
-                    "
-                  >
-                    SignAI Landmark Classifier
-                  </p>
+                  <label className="toggle">
+                    <input type="checkbox" checked={autoAppend} onChange={(e) => setAutoAppend(e.target.checked)} />
+                    <span className="track" />
+                    <span>Enable auto-append to sentence</span>
+                  </label>
+                  <span className="hint">Automatically adds steady letters to the text box</span>
                 </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {error && (
+          <div className="alert alert-err">
+            <b>Recognition stopped</b>
+            {error}
+          </div>
+        )}
+
+        {/* HUD */}
+        <div className="grid grid-4">
+          {[
+            { label: "Sign output", value: currentLabel, accent: "var(--primary)" },
+            { label: "Confidence", value: <AnimatedNumber value={confidence} suffix="%" />, accent: confidence >= 65 ? "var(--ok)" : "var(--warn)" },
+            { label: "Latency", value: <>{processingTime}<span className="unit">ms</span></>, accent: "var(--info)" },
+            { label: "Live speed", value: <>{fps}<span className="unit">FPS</span></>, accent: "var(--hand)" },
+          ].map((item, index) => (
+            <motion.div
+              key={item.label}
+              className="card stat-card"
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.06, duration: 0.45 }}
+              style={{ "--accent": item.accent }}
+            >
+              <span className="stat-label">{item.label}</span>
+              <div className="stat-value" style={{ fontSize: "var(--fs-xl)" }}>{item.value}</div>
+            </motion.div>
+          ))}
+        </div>
+
+        <div className="grid grid-2" style={{ alignItems: "start" }}>
+          <div className="stack">
+            <div className="card">
+              <div className={`camera ${isRunning ? "is-live" : ""}`}>
+                {isRunning ? (
+                  <Webcam ref={webcamRef} audio={false} screenshotFormat="image/jpeg" videoConstraints={{ facingMode: "user", width: 640, height: 480 }} />
+                ) : (
+                  <div className="stack" style={{ height: "100%", alignItems: "center", justifyContent: "center", padding: "32px", textAlign: "center" }}>
+                    <div className="camera-idle-mark">
+                      <span>S</span>
+                    </div>
+                    <h3 style={{ color: "#fff", marginBottom: 0 }}>Camera is paused</h3>
+                    <p className="text-sm" style={{ color: "rgba(255,255,255,0.62)", maxWidth: "34ch" }}>
+                      Start the camera to begin real-time sign recognition.
+                    </p>
+                  </div>
+                )}
+
+                {isRunning && <span className="badge badge-err badge-dot live">Live</span>}
+
+                {isRunning && (
+                  <>
+                    <span className="hand-tag" style={{ left: "30%", top: "14%" }}>Hand 1</span>
+                    <div className="hand-box" style={{ left: "30%", top: "20%", width: "40%", height: "52%" }} />
+                  </>
+                )}
+
+                {isRunning && currentLabel !== "—" && (
+                  <span className="badge badge-pri" style={{ position: "absolute", left: "var(--space-3)", top: "var(--space-3)", zIndex: 2 }}>
+                    Holding {currentLabel} · {confidence}%
+                  </span>
+                )}
+
+                {isRunning && autoAppend && holdProgress > 0 && (
+                  <div style={{ position: "absolute", left: "18px", right: "18px", bottom: "14px", zIndex: 2 }}>
+                    <div className="row row-between" style={{ marginBottom: "6px" }}>
+                      <span className="badge badge-pri">Locking {currentLabel}</span>
+                      <span className="badge badge-pri">{Math.round(holdProgress)}%</span>
+                    </div>
+                    <div className="progress">
+                      <i style={{ width: `${holdProgress}%` }} />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="row row-between" style={{ marginTop: "var(--space-4)" }}>
+                <div className="row">
+                  <button
+                    onClick={() => {
+                      if (isRunning) {
+                        setHoldProgress(0);
+                        holdStartTimeRef.current = null;
+                      }
+                      setIsRunning((prev) => !prev);
+                    }}
+                    className={`btn ${isRunning ? "btn-danger" : "btn-primary"}`}
+                  >
+                    {isRunning ? "Stop camera" : "Start camera"}
+                  </button>
+
+                  {currentLabel !== "—" && (
+                    <button onClick={() => speakText(currentLabel)} className="btn btn-ghost btn-sm">
+                      Speak letter
+                    </button>
+                  )}
+                </div>
+
+                <span className={`badge badge-dot ${isRunning ? "badge-ok" : "badge-info"}`}>
+                  {isRunning ? "Tracking active" : "Camera paused"}
+                </span>
+              </div>
+            </div>
+
+            <div className="caption caption-now">
+              <span className="hint">Now signing</span>
+              <div className="caption-text">{currentLabel === "—" ? "Waiting for a sign" : currentLabel}</div>
+              <div
+                className={`meter ${confidence >= 65 ? "high" : "low"}`}
+                role="meter"
+                aria-valuenow={confidence}
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-label="Confidence"
+              >
+                <i style={{ width: `${confidence}%` }} />
+              </div>
+              <p className="hint">Confidence {confidence} percent</p>
+            </div>
+
+            <div className="card stack">
+              <div className="row row-between">
+                <div>
+                  <h3 style={{ marginBottom: 0 }}>Sentence builder</h3>
+                  <p className="hint" style={{ marginTop: "4px" }}>Hold a sign steady to add it to the transcript.</p>
+                </div>
+
+                <div className="row">
+                  <button onClick={() => speakText(sentence)} disabled={!sentence} className="btn btn-ghost btn-sm">
+                    Speak sentence
+                  </button>
+                  <button onClick={copySentence} disabled={!sentence} className="btn btn-ghost btn-sm">
+                    {copied ? "Copied" : "Copy text"}
+                  </button>
+                  <button onClick={downloadTranscript} disabled={!sentence} className="btn btn-ghost btn-sm">
+                    Download
+                  </button>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  minHeight: "112px",
+                  width: "100%",
+                  borderRadius: "var(--r-m)",
+                  border: "1px solid var(--line)",
+                  background: "var(--surface-2)",
+                  padding: "var(--space-4)",
+                  fontSize: "1.25rem",
+                  fontWeight: 500,
+                  letterSpacing: "0.02em",
+                  color: "var(--ink)",
+                }}
+              >
+                {sentence ? (
+                  <div className="row" style={{ gap: "4px" }}>
+                    {sentence.split("").map((char, index) => (
+                      <motion.span
+                        key={`${index}-${char}`}
+                        initial={{ scale: 0.5, opacity: 0, y: 6 }}
+                        animate={{ scale: 1, opacity: 1, y: 0 }}
+                        transition={{ type: "spring", stiffness: 500, damping: 28 }}
+                        className={char === " " ? "" : "badge badge-pri"}
+                        style={char === " " ? { display: "inline-block", width: "12px" } : { fontFamily: "var(--font-display)", fontSize: "1.05rem" }}
+                      >
+                        {char}
+                      </motion.span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-sm text-muted" style={{ fontStyle: "italic" }}>
+                    Hold signs in front of the camera to assemble words and sentences here…
+                  </span>
+                )}
+              </div>
+
+              <div className="row">
+                <button onClick={addSpace} className="btn btn-ghost btn-sm">Add space</button>
+                <button onClick={handleBackspace} disabled={!sentence} className="btn btn-ghost btn-sm">Backspace</button>
+                <button onClick={clearSentence} disabled={!sentence} className="btn btn-ghost btn-sm" style={{ color: "var(--err)" }}>
+                  Clear all
+                </button>
+              </div>
+
+              {/* AI Language Processing Layer (Groq API) */}
+              <div
+                className="card card-flat"
+                style={{
+                  marginTop: "var(--space-2)",
+                  background: "var(--surface-3)",
+                  border: "1px solid var(--line)",
+                  borderRadius: "var(--r-m)",
+                  padding: "var(--space-4)",
+                }}
+              >
+                <div className="row row-between" style={{ marginBottom: "var(--space-2)" }}>
+                  <div className="row" style={{ gap: "var(--space-2)" }}>
+                    <span className="badge badge-pri">Groq AI Processing</span>
+                    {aiNotice && (
+                      <span className="badge badge-dot badge-info" style={{ fontSize: "0.75rem" }}>
+                        {aiNotice}
+                      </span>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={() => refineWithGroq()}
+                    disabled={!sentence || isRefining}
+                    className={`btn btn-sm ${isRefining ? "btn-ghost" : "btn-primary"}`}
+                  >
+                    {isRefining ? (
+                      <>
+                        <span className="spinner spinner-sm" aria-hidden="true" style={{ marginRight: "6px" }} />
+                        Constructing sentence…
+                      </>
+                    ) : (
+                      "Refine with Groq AI"
+                    )}
+                  </button>
+                </div>
+
+                <div style={{ marginTop: "var(--space-2)" }}>
+                  <div className="row row-between" style={{ marginBottom: "4px" }}>
+                    <span className="hint" style={{ fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      AI Context-Aware Sentence:
+                    </span>
+                    {aiSentence && (
+                      <span className="hint" style={{ fontSize: "0.75rem" }}>
+                        Grammar corrected & structured
+                      </span>
+                    )}
+                  </div>
+
+                  <div
+                    style={{
+                      minHeight: "48px",
+                      padding: "var(--space-3)",
+                      borderRadius: "var(--r-s)",
+                      background: "var(--surface-2)",
+                      border: "1px solid var(--line)",
+                      color: aiSentence ? "var(--ink)" : "var(--ink-3)",
+                      fontSize: "1.1rem",
+                      fontWeight: 500,
+                      display: "flex",
+                      alignItems: "center",
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    {aiSentence ? (
+                      <motion.span
+                        initial={{ opacity: 0, y: 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.3 }}
+                      >
+                        {aiSentence}
+                      </motion.span>
+                    ) : (
+                      <span className="text-sm text-muted" style={{ fontStyle: "italic" }}>
+                        Click "Refine with Groq AI" above to transform your recognized signs into a natural, complete sentence.
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {aiSentence && (
+                  <div className="row" style={{ marginTop: "var(--space-3)", gap: "var(--space-2)" }}>
+                    <button
+                      onClick={() => speakText(aiSentence)}
+                      className="btn btn-secondary btn-sm"
+                    >
+                      <Volume2 size={15} aria-hidden="true" />
+                      Speak AI sentence
+                    </button>
+                    <button
+                      onClick={copyAiSentence}
+                      className="btn btn-ghost btn-sm"
+                    >
+                      {aiCopied ? "Copied" : "Copy AI sentence"}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
-        </section>
+
+          <div className="stack">
+            <div className="card card-hover">
+              <div className="section-head" style={{ marginBottom: 0 }}>
+                <div>
+                  <h3 style={{ marginBottom: 0 }}>Confidence distribution</h3>
+                  <p>Top predicted sign probabilities</p>
+                </div>
+                <span className="badge badge-pri">{topPredictions.length} candidates</span>
+              </div>
+
+              <div className="stack" style={{ marginTop: "var(--space-4)", gap: "var(--space-3)" }}>
+                {topPredictions.length > 0 ? (
+                  topPredictions.map((item, idx) => (
+                    <div key={`${item.label}-${idx}`}>
+                      <div className="row row-between" style={{ marginBottom: "4px" }}>
+                        <span className="text-sm fw-semibold">Letter {item.label}</span>
+                        <span className="text-sm text-muted">{Math.round(item.confidence_percent || 0)}%</span>
+                      </div>
+                      <div className="meter">
+                        <i style={{ width: `${Math.min(100, item.confidence_percent || 0)}%` }} />
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="empty">
+                    <p className="text-sm text-muted">No active predictions</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="card card-hover">
+              <div className="row row-between">
+                <h3 style={{ marginBottom: 0 }}>Detection stream</h3>
+                <span className="hint" style={{ marginTop: 0 }}>{history.length} logged</span>
+              </div>
+
+              <div className="stack" style={{ marginTop: "var(--space-4)", maxHeight: "320px", overflowY: "auto", gap: "var(--space-2)" }}>
+                <AnimatePresence initial={false}>
+                  {history.length > 0 ? (
+                    history.map((item) => (
+                      <motion.div
+                        key={item.id}
+                        layout
+                        initial={{ opacity: 0, x: 16, scale: 0.98 }}
+                        animate={{ opacity: 1, x: 0, scale: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.25 }}
+                        className="caption"
+                        style={{ marginBottom: 0 }}
+                      >
+                        <div className="row row-between" style={{ marginBottom: "4px" }}>
+                          <span className="text-sm fw-semibold">Letter {item.label}</span>
+                          <span className="badge badge-ok">{item.confidence}%</span>
+                        </div>
+                        <div className={`meter ${item.confidence >= 65 ? "high" : "low"}`} style={{ marginTop: 0 }}>
+                          <i style={{ width: `${item.confidence}%` }} />
+                        </div>
+                        <p className="hint" style={{ marginTop: "4px" }}>{item.time}</p>
+                      </motion.div>
+                    ))
+                  ) : (
+                    <div className="empty">
+                      <p className="text-sm text-muted">Predictions will appear here in real time.</p>
+                    </div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </div>
+
+            <div className="card card-flat">
+              <h3 style={{ marginBottom: "var(--space-2)" }}>Tips for a clean read</h3>
+              <ul className="text-sm text-soft" style={{ paddingLeft: "1.2rem" }}>
+                <li className="mb-1">Face a window or lamp so the hand is evenly lit.</li>
+                <li className="mb-1">Keep the whole hand inside the frame.</li>
+                <li>Hold the sign still until the lock meter fills.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
       </div>
-    </DashboardLayout>
+    </>
   );
 };
 

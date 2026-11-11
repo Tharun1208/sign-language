@@ -1,0 +1,25 @@
+{
+  "name": "SignAI — Sign Language Recognition",
+  "short_name": "SignAI",
+  "description": "Real-time sign language recognition, live captions and two-way conversation.",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0C0A18",
+  "theme_color": "#5B3FD9",
+  "icons": [
+    {
+      "src": "/app-icon.png",
+      "sizes": "410x420",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

@@ -1,186 +1,122 @@
-import React, { useState } from "react";
-
+import { Suspense, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
+import {
+  LayoutDashboard,
+  ScanFace,
+  Film,
+  BookOpenText,
+  Settings as SettingsIcon,
+} from "lucide-react";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
+import CommandPalette from "../ui/CommandPalette";
+import RouteFallback from "../ui/RouteFallback";
+import { pageMeta } from "../../data/navigation";
+
+const mobileItems = [
+  { title: "Overview", path: "/dashboard", icon: LayoutDashboard },
+  { title: "Live", path: "/live-recognition", icon: ScanFace },
+  { title: "Video", path: "/video-translation", icon: Film },
+  { title: "Dictionary", path: "/dictionary", icon: BookOpenText },
+  { title: "Settings", path: "/settings", icon: SettingsIcon },
+];
 
 const DashboardLayout = ({ children }) => {
-  const [collapsed, setCollapsed] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const location = useLocation();
+  const mainRef = useRef(null);
+  const firstRender = useRef(true);
+
+  // Global ⌘K / Ctrl+K shortcut for the command palette.
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      const isPaletteShortcut =
+        (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k";
+      if (isPaletteShortcut) {
+        event.preventDefault();
+        setPaletteOpen((current) => !current);
+        return;
+      }
+      if (event.key === "Escape") setSidebarOpen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // Move focus to the page region after navigation for keyboard and
+  // screen-reader users. Skip the very first render to avoid stealing focus.
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    mainRef.current?.focus({ preventScroll: true });
+  }, [location.pathname]);
+
+  // Keep the document title in sync with the current workspace page.
+  useEffect(() => {
+    const title = pageMeta[location.pathname]?.title;
+    document.title = title ? `${title} · SignAI` : "SignAI — Sign Language Recognition";
+  }, [location.pathname]);
 
   return (
-    <div className="relative flex h-screen w-full overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-white">
-      {/* =========================================================
-          BACKGROUND ATMOSPHERE
-      ========================================================= */}
+    <div className="app-shell">
+      <a className="skip-link" href="#main-content">
+        Skip to content
+      </a>
 
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute -left-40 -top-40 h-[420px] w-[420px] rounded-full bg-indigo-500/[0.035] blur-3xl dark:bg-indigo-500/[0.06]" />
+      <Sidebar
+        open={sidebarOpen}
+        setOpen={setSidebarOpen}
+        onOpenPalette={() => setPaletteOpen(true)}
+      />
 
-        <div className="absolute right-[-180px] top-[15%] h-[420px] w-[420px] rounded-full bg-purple-500/[0.025] blur-3xl dark:bg-purple-500/[0.045]" />
+      <button
+        type="button"
+        aria-label="Close menu"
+        className={`sidebar-scrim ${sidebarOpen ? "show" : ""}`}
+        onClick={() => setSidebarOpen(false)}
+      />
 
-        <div className="absolute bottom-[-180px] left-[35%] h-[380px] w-[380px] rounded-full bg-blue-500/[0.025] blur-3xl dark:bg-blue-500/[0.04]" />
-      </div>
-
-      {/* =========================================================
-          SIDEBAR
-      ========================================================= */}
-
-      <aside className="relative z-30 shrink-0">
-        <Sidebar
-          collapsed={collapsed}
-          setCollapsed={setCollapsed}
-        />
-      </aside>
-
-      {/* =========================================================
-          MAIN APPLICATION
-      ========================================================= */}
-
-      <div className="relative z-10 flex h-screen min-w-0 flex-1 flex-col overflow-hidden">
-        {/* =======================================================
-            TOPBAR
-        ======================================================= */}
-
-        <header
-          className="
-            relative
-            z-20
-            shrink-0
-
-            border-b
-            border-slate-200/80
-            bg-white/85
-
-            backdrop-blur-xl
-
-            dark:border-slate-800/80
-            dark:bg-slate-950/85
-          "
-        >
-          <Topbar />
-        </header>
-
-        {/* =======================================================
-            MAIN CONTENT
-        ======================================================= */}
-
-        <main
-          className="
-            relative
-            min-h-0
-            min-w-0
-            flex-1
-
-            overflow-y-auto
-            overflow-x-hidden
-
-            scroll-smooth
-
-            bg-transparent
-
-            scrollbar-thin
-            scrollbar-track-transparent
-            scrollbar-thumb-slate-300
-
-            dark:scrollbar-thumb-slate-700
-          "
-        >
-          {/* =====================================================
-              TOP FADE / GRID EFFECT
-          ===================================================== */}
-
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-indigo-500/[0.025] to-transparent dark:from-indigo-500/[0.04]" />
-
-          {/* =====================================================
-              CONTENT CONTAINER
-          ===================================================== */}
-
-          <div
-            className="
-              relative
-              mx-auto
-              w-full
-              max-w-[1800px]
-
-              px-4
-              py-5
-
-              sm:px-6
-              sm:py-6
-
-              md:px-8
-              md:py-8
-
-              lg:px-10
-              lg:py-9
-
-              xl:px-12
-              xl:py-10
-
-              2xl:px-14
-            "
-          >
-            {/* =================================================
-                PAGE CONTENT
-            ================================================= */}
-
-            <div className="animate-[fadeIn_0.35s_ease-out]">
-              {children}
-            </div>
-
-            {/* =================================================
-                BOTTOM SPACING
-            ================================================= */}
-
-            <div className="h-8 sm:h-10" />
-          </div>
+      <div className="app-main">
+        <Topbar onMenu={() => setSidebarOpen(true)} onOpenPalette={() => setPaletteOpen(true)} />
+        <main className="app-content" id="main-content" ref={mainRef} tabIndex={-1}>
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={location.pathname}
+              initial={{ opacity: 0, y: 16, filter: "blur(5px)" }}
+              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+              exit={{ opacity: 0, y: -10, filter: "blur(3px)" }}
+              transition={{ duration: 0.36, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <Suspense fallback={<RouteFallback />}>
+                {children || <Outlet />}
+              </Suspense>
+            </motion.div>
+          </AnimatePresence>
         </main>
       </div>
 
-      {/* =========================================================
-          GLOBAL ANIMATION
-      ========================================================= */}
+      <nav className="mobile-nav" aria-label="Mobile navigation">
+        {mobileItems.map((item) => {
+          const Icon = item.icon;
+          return (
+            <NavLink
+              key={item.path}
+              to={item.path}
+              className={({ isActive }) => `mobile-nav-link ${isActive ? "active" : ""}`}
+              aria-current={location.pathname === item.path ? "page" : undefined}
+            >
+              <Icon size={19} strokeWidth={1.9} aria-hidden="true" />
+              <span>{item.title}</span>
+            </NavLink>
+          );
+        })}
+      </nav>
 
-      <style>
-        {`
-          @keyframes fadeIn {
-            from {
-              opacity: 0;
-              transform: translateY(4px);
-            }
-
-            to {
-              opacity: 1;
-              transform: translateY(0);
-            }
-          }
-
-          /* Chrome / Edge / Safari */
-          main::-webkit-scrollbar {
-            width: 7px;
-          }
-
-          main::-webkit-scrollbar-track {
-            background: transparent;
-          }
-
-          main::-webkit-scrollbar-thumb {
-            background: rgba(148, 163, 184, 0.35);
-            border-radius: 9999px;
-          }
-
-          main::-webkit-scrollbar-thumb:hover {
-            background: rgba(99, 102, 241, 0.45);
-          }
-
-          .dark main::-webkit-scrollbar-thumb {
-            background: rgba(71, 85, 105, 0.45);
-          }
-
-          .dark main::-webkit-scrollbar-thumb:hover {
-            background: rgba(99, 102, 241, 0.5);
-          }
-        `}
-      </style>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
   );
 };

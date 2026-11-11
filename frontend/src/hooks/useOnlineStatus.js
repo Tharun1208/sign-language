@@ -1,0 +1,26 @@
+import { useEffect, useState } from "react";
+
+/**
+ * Tracks browser connectivity so the shell can warn the user before a
+ * recognition request silently fails.
+ */
+const useOnlineStatus = () => {
+  const [online, setOnline] = useState(() =>
+    typeof navigator === "undefined" ? true : navigator.onLine
+  );
+
+  useEffect(() => {
+    const goOnline = () => setOnline(true);
+    const goOffline = () => setOnline(false);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
+  }, []);
+
+  return online;
+};
+
+export default useOnlineStatus;

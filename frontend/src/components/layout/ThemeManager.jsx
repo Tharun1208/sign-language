@@ -1,44 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+
+// =========================================================
+// LIGHT-ONLY THEME GUARD
+// Kept for backwards compatibility. It always enforces the
+// light theme and ignores any legacy theme events.
+// =========================================================
 
 const ThemeManager = () => {
-  const [theme, setTheme] = useState(() => {
-    const savedTheme = localStorage.getItem("theme");
-
-    return savedTheme === "light" ? "light" : "dark";
-  });
-
   useEffect(() => {
     const root = document.documentElement;
-
-    if (theme === "dark") {
-      root.classList.add("dark");
-    } else {
-      root.classList.remove("dark");
-    }
-
-    localStorage.setItem("theme", theme);
-  }, [theme]);
-
-  useEffect(() => {
-    const handleThemeChange = (event) => {
-      const newTheme = event.detail;
-
-      if (newTheme === "light" || newTheme === "dark") {
-        setTheme(newTheme);
-      }
-    };
-
-    window.addEventListener(
-      "themeChange",
-      handleThemeChange
-    );
-
-    return () => {
-      window.removeEventListener(
-        "themeChange",
-        handleThemeChange
-      );
-    };
+    root.classList.remove("dark");
+    root.setAttribute("data-theme", "light");
   }, []);
 
   return null;

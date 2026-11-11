@@ -1,0 +1,124 @@
+/* ==========================================================
+   SIGNAL 2.0 → SignAI bridge
+   Keeps the design-system tokens in sync with Tailwind utilities
+   and adds the ambient background + typography glue.
+   ========================================================== */
+
+:root {
+  /* Brand primary: violet */
+  --color-cyan-50: #F1EDFE;
+  --color-cyan-100: #E6E0FB;
+  --color-cyan-200: #D3C8F7;
+  --color-cyan-300: #B9A6F3;
+  --color-cyan-400: #8C77F5;
+  --color-cyan-500: #5B3FD9;
+  --color-cyan-600: #4930B8;
+  --color-cyan-700: #3B2596;
+  --color-cyan-800: #2C1B73;
+  --color-cyan-900: #1F1254;
+  --color-cyan-950: #140B36;
+
+  --color-blue-400: #8C77F5;
+  --color-blue-500: #6D4FE8;
+  --color-blue-600: #5B3FD9;
+  --color-blue-700: #4930B8;
+  --color-blue-800: #3B2596;
+  --color-blue-900: #2C1B73;
+  --color-blue-950: #140B36;
+
+  --color-indigo-400: #9B86F7;
+  --color-indigo-500: #7C5CFF;
+  --color-indigo-600: #5B3FD9;
+  --color-indigo-700: #4930B8;
+  --color-indigo-900: #2C1B73;
+  --color-indigo-950: #140B36;
+
+  --color-purple-400: #B9A6F3;
+  --color-purple-500: #A78BFA;
+  --color-purple-600: #8C77F5;
+  --color-purple-700: #6D4FE8;
+
+  /* Neutrals */
+  --color-slate-50: #F6F4FB;
+  --color-slate-100: #ECE8F6;
+  --color-slate-200: #DAD5EA;
+  --color-slate-300: #C3BEDB;
+  --color-slate-400: #8F8AAB;
+  --color-slate-500: #7B7794;
+  --color-slate-600: #4A4663;
+  --color-slate-700: #34305A;
+  --color-slate-800: #231F40;
+  --color-slate-900: #191630;
+  --color-slate-950: #0F0D1E;
+
+  --color-gray-50: #F6F4FB;
+  --color-gray-100: #ECE8F6;
+  --color-gray-200: #DAD5EA;
+  --color-gray-400: #8F8AAB;
+
+  /* Status */
+  --color-emerald-300: #7BE3C1;
+  --color-emerald-400: #4FD1A5;
+  --color-emerald-500: #14805F;
+  --color-emerald-600: #0F6B4F;
+  --color-emerald-950: #12372E;
+
+  --color-rose-300: #FFA7BC;
+  --color-rose-400: #FF7D9C;
+  --color-rose-500: #B42346;
+  --color-rose-600: #951D3B;
+  --color-rose-950: #401828;
+
+  --color-amber-300: #F5D585;
+  --color-amber-400: #F0C25A;
+  --color-amber-500: #8A5A00;
+  --color-amber-600: #6E4800;
+
+  --color-sky-400: #7DB6F2;
+  --color-sky-500: #1F5FA8;
+
+  /* Typography */
+  --font-sans: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* Radii / shadows */
+  --radius-s: 8px;
+  --radius-m: 14px;
+  --radius-l: 22px;
+  --shadow-soft: var(--shadow-s);
+}
+
+/* ---- Base typography ---- */
+html { font-family: var(--font-body); }
+
+body {
+  font-family: var(--font-body);
+  color: var(--ink);
+  background-color: var(--bg);
+}
+
+h1, h2, h3, h4, h5, h6, .display { font-family: var(--font-display); }
+
+/* Ambient gradient wash behind the app shell */
+.app-shell::before,
+.auth-shell::before {
+  content: "";
+  position: fixed;
+  inset: -20%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(600px 420px at 12% 8%, rgba(124, 92, 255, 0.14), transparent 60%),
+    radial-gradient(520px 380px at 92% 18%, rgba(232, 70, 124, 0.10), transparent 60%),
+    radial-gradient(680px 480px at 60% 100%, rgba(91, 63, 217, 0.12), transparent 62%);
+  animation: aurora 22s ease-in-out infinite;
+}
+.app-shell > * { position: relative; z-index: 1; }
+.auth-shell > * { position: relative; z-index: 1; }
+
+/* Selection */
+::selection { background: var(--primary-soft); color: var(--ink); }
+
+/* Scrollbars completely removed */
+main::-webkit-scrollbar, ::-webkit-scrollbar { display: none !important; width: 0 !important; }
+* { scrollbar-width: none !important; -ms-overflow-style: none !important; }
+

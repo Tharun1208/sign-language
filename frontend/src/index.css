@@ -1,10 +1,11 @@
 @import "tailwindcss";
 
-/* Enable class-based dark mode */
+/* Class-based dark mode kept for any legacy utility */
 @custom-variant dark (&:where(.dark, .dark *));
 
 html {
-  transition: background-color 0.3s ease, color 0.3s ease;
+  transition: background-color 0.4s ease, color 0.4s ease;
+  background: var(--bg-deep, #08060f);
 }
 
 body {
@@ -12,3 +13,42 @@ body {
   min-width: 320px;
   min-height: 100vh;
 }
+
+/* Prevent flash before React mounts */
+#root { min-height: 100vh; }
+
+/* ============================================================
+   UNIVERSAL SCROLLBAR REMOVAL
+   Completely removes all scrollbars across all pages, containers,
+   and elements while maintaining natural touch and mouse scroll.
+   ============================================================ */
+
+*,
+*::before,
+*::after,
+html,
+body,
+#root {
+  scrollbar-width: none !important; /* Firefox */
+  -ms-overflow-style: none !important; /* IE 10+ and Edge */
+}
+
+/* Chrome, Safari, Edge, Opera WebKit pseudo-elements */
+*::-webkit-scrollbar,
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+#root::-webkit-scrollbar,
+::-webkit-scrollbar {
+  display: none !important;
+  width: 0px !important;
+  height: 0px !important;
+  background: transparent !important;
+}
+
+*::-webkit-scrollbar-thumb,
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  display: none !important;
+  background: transparent !important;
+}
+
