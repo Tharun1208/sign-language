@@ -1,31 +1,39 @@
-@"
 # Python
 __pycache__/
 *.py[cod]
+*$py.class
 *.pyo
 
 # Python virtual environments
 venv/
 env/
 signai-env/
+.venv/
 
-# Environment variables
+# Environment variables & secrets
 .env
 .env.*
+*.env
 
-# Machine learning dataset
+# Machine learning dataset & large binaries
 backend/dataset/
+backend/uploads/
+backend/data/
+backend/users.json
+backend/feedback.json
 
-# Frontend dependencies
+# Frontend dependencies & builds
 frontend/node_modules/
-
-# Frontend build
 frontend/dist/
+frontend/.cache/
 
 # Logs
 *.log
+*.tmp
+*.lock
 
-# OS files
+# OS & Editor files
 .DS_Store
 Thumbs.db
-"@ | Set-Content .gitignore
+.vscode/
+.idea/

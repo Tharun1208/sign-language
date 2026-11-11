@@ -2,12 +2,56 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Sign AI</title>
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="apple-touch-icon" href="/logo.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#5B3FD9" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0C0A18" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700;800&family=Figtree:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <meta
+      name="description"
+      content="SignAI — real-time sign language recognition, live captions and two-way conversation."
+    />
+    <meta property="og:title" content="SignAI — Sign Language Recognition" />
+    <meta
+      property="og:description"
+      content="Real-time sign language recognition with live captions, confidence scoring and two-way conversation."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/hero.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <title>SignAI — Sign Language Recognition</title>
+    <script>
+      // Apply the saved theme before first paint to avoid a flash of the wrong
+      // colours. Keep the key in sync with ThemeContext.
+      (function () {
+        try {
+          var stored = localStorage.getItem("signai-theme");
+          var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+          var theme = stored === "dark" || stored === "light" ? stored : dark ? "dark" : "light";
+          document.documentElement.setAttribute("data-theme", theme);
+          document.documentElement.classList.toggle("dark", theme === "dark");
+          document.documentElement.style.colorScheme = theme;
+        } catch (error) {
+          /* ignore */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <div style="padding: 32px; font-family: system-ui, sans-serif">
+        SignAI needs JavaScript enabled to run the recognition workspace.
+      </div>
+    </noscript>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

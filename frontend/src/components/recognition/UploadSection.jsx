@@ -1,17 +1,5 @@
 import { useRef, useState } from "react";
 
-import {
-  Upload,
-  Image as ImageIcon,
-  X,
-  Loader2,
-  CheckCircle,
-  AlertCircle,
-  Sparkles,
-  FileImage,
-  RotateCcw,
-} from "lucide-react";
-
 const API_URL = import.meta.env.VITE_API_URL;
 
 const UploadSection = ({
@@ -517,7 +505,7 @@ const UploadSection = ({
   // =====================================================
 
   return (
-    <div className="w-full p-5 sm:p-6">
+    <div className="stack">
 
       {/* =================================================
           UPLOAD AREA
@@ -532,243 +520,35 @@ const UploadSection = ({
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          className={`
-            group
-            relative
-            flex
-            min-h-[280px]
-            w-full
-            flex-col
-            items-center
-            justify-center
-            overflow-hidden
-            rounded-2xl
-            border-2
-            border-dashed
-            px-6
-            text-center
-
-            transition-all
-            duration-300
-
-            ${
-              isDragging
-                ? `
-                  border-indigo-500
-                  bg-indigo-50
-                  shadow-lg
-                  shadow-indigo-500/10
-
-                  dark:border-indigo-400
-                  dark:bg-indigo-500/10
-                `
-                : `
-                  border-slate-300
-                  bg-slate-50
-
-                  hover:border-indigo-400
-                  hover:bg-indigo-50/50
-                  hover:shadow-lg
-                  hover:shadow-indigo-500/5
-
-                  dark:border-slate-700
-                  dark:bg-slate-800/50
-
-                  dark:hover:border-indigo-500
-                  dark:hover:bg-indigo-500/5
-                `
-            }
-          `}
+          className={`drop${isDragging ? " over" : ""}`}
+          style={{ minHeight: "280px" }}
         >
-          {/* Background decoration */}
+          <span className="badge badge-pri">Upload</span>
 
-          <div
-            className="
-              pointer-events-none
-              absolute
-              -right-10
-              -top-10
-              h-32
-              w-32
-              rounded-full
-              bg-indigo-500/5
-              blur-2xl
-
-              transition-all
-              duration-500
-
-              group-hover:scale-150
-            "
-          />
-
-          <div
-            className="
-              pointer-events-none
-              absolute
-              -bottom-10
-              -left-10
-              h-32
-              w-32
-              rounded-full
-              bg-purple-500/5
-              blur-2xl
-
-              transition-all
-              duration-500
-
-              group-hover:scale-150
-            "
-          />
-
-          {/* Upload Icon */}
-
-          <div
-            className={`
-              relative
-              mb-5
-              flex
-              h-20
-              w-20
-              items-center
-              justify-center
-              rounded-2xl
-
-              bg-indigo-100
-              text-indigo-600
-
-              shadow-sm
-
-              transition-all
-              duration-300
-
-              group-hover:-translate-y-1
-              group-hover:scale-105
-              group-hover:shadow-lg
-              group-hover:shadow-indigo-500/20
-
-              dark:bg-indigo-500/10
-              dark:text-indigo-400
-            `}
-          >
-            {isDragging ? (
-              <FileImage
-                size={32}
-                className="animate-bounce"
-              />
-            ) : (
-              <Upload
-                size={32}
-                className="
-                  transition-transform
-                  duration-300
-
-                  group-hover:-translate-y-1
-                "
-              />
-            )}
-          </div>
-
-          {/* Title */}
-
-          <h4
-            className="
-              relative
-              text-base
-              font-semibold
-
-              text-slate-800
-
-              dark:text-white
-            "
-          >
+          <h3 className="mt-4">
             {isDragging
               ? "Drop your image here"
-              : "Upload Hand Gesture Image"}
-          </h4>
+              : "Upload hand gesture image"}
+          </h3>
 
-          {/* Description */}
-
-          <p
-            className="
-              relative
-              mt-2
-              text-sm
-
-              text-slate-500
-
-              dark:text-slate-400
-            "
-          >
+          <p className="hint">
             {isDragging
               ? "Release to upload your image"
-              : "Click or drag & drop an image here"}
+              : "Click or drag and drop an image here"}
           </p>
 
-          {/* File types */}
-
           <div
-            className="
-              relative
-              mt-4
-              flex
-              flex-wrap
-              items-center
-              justify-center
-              gap-2
-            "
+            className="row mt-4"
+            style={{ justifyContent: "center", gap: "var(--space-2)" }}
           >
-            {[
-              "JPG",
-              "PNG",
-              "JPEG",
-              "BMP",
-              "WEBP",
-            ].map((type) => (
-              <span
-                key={type}
-                className="
-                  rounded-lg
-                  border
-                  border-slate-200
-                  bg-white
-                  px-2.5
-                  py-1
-                  text-[10px]
-                  font-semibold
-                  uppercase
-                  tracking-wide
-                  text-slate-500
-
-                  transition-all
-                  duration-200
-
-                  group-hover:border-indigo-200
-                  group-hover:text-indigo-600
-
-                  dark:border-slate-700
-                  dark:bg-slate-900
-                  dark:text-slate-400
-
-                  dark:group-hover:border-indigo-500/30
-                  dark:group-hover:text-indigo-400
-                "
-              >
+            {["JPG", "PNG", "JPEG", "BMP", "WEBP"].map((type) => (
+              <span key={type} className="badge badge-info">
                 {type}
               </span>
             ))}
           </div>
 
-          <p
-            className="
-              relative
-              mt-3
-              text-[11px]
-
-              text-slate-400
-            "
-          >
-            Maximum file size: 10 MB
-          </p>
+          <p className="hint mt-4">Maximum file size: 10 MB</p>
         </button>
       )}
 
@@ -795,140 +575,31 @@ const UploadSection = ({
       ================================================= */}
 
       {preview && (
-        <div className="space-y-4">
+        <div className="stack">
 
           {/* IMAGE PREVIEW */}
 
-          <div
-            className="
-              group
-              relative
-              overflow-hidden
-              rounded-2xl
-              border
+          <div className="card">
+            <div className="camera">
+              <img
+                src={preview}
+                alt="Selected hand gesture"
+                style={{ objectFit: "contain" }}
+              />
 
-              border-slate-200
-              bg-slate-100
+              <span className="badge badge-pri live">Image preview</span>
+            </div>
 
-              shadow-sm
-
-              transition-all
-              duration-300
-
-              hover:border-indigo-200
-              hover:shadow-lg
-              hover:shadow-indigo-500/5
-
-              dark:border-slate-700
-              dark:bg-slate-800
-
-              dark:hover:border-indigo-500/30
-            "
-          >
-            <img
-              src={preview}
-              alt="Selected hand gesture"
-              className="
-                max-h-[380px]
-                min-h-[220px]
-                w-full
-                object-contain
-                p-2
-
-                transition-transform
-                duration-500
-
-                group-hover:scale-[1.02]
-              "
-            />
-
-            {/* Image overlay */}
-
-            <div
-              className="
-                pointer-events-none
-                absolute
-                inset-0
-                bg-gradient-to-t
-                from-slate-950/10
-                via-transparent
-                to-transparent
-                opacity-0
-
-                transition-opacity
-                duration-300
-
-                group-hover:opacity-100
-              "
-            />
-
-            {/* Remove */}
-
-            <button
-              type="button"
-              onClick={handleRemove}
-              disabled={loading}
-              className="
-                absolute
-                right-3
-                top-3
-                flex
-                h-10
-                w-10
-                items-center
-                justify-center
-                rounded-xl
-
-                bg-red-500
-                text-white
-
-                shadow-lg
-                shadow-red-500/20
-
-                transition-all
-                duration-200
-
-                hover:-translate-y-0.5
-                hover:scale-105
-                hover:bg-red-600
-                hover:shadow-xl
-                hover:shadow-red-500/30
-
-                active:scale-95
-
-                disabled:cursor-not-allowed
-                disabled:opacity-50
-              "
-              title="Remove image"
-            >
-              <X size={18} />
-            </button>
-
-            {/* Preview badge */}
-
-            <div
-              className="
-                absolute
-                bottom-3
-                left-3
-                flex
-                items-center
-                gap-2
-                rounded-xl
-                border
-                border-white/20
-                bg-slate-950/70
-                px-3
-                py-2
-                text-xs
-                font-medium
-                text-white
-                backdrop-blur-md
-              "
-            >
-              <ImageIcon size={14} />
-
-              Image Preview
+            <div className="row mt-4">
+              <button
+                type="button"
+                onClick={handleRemove}
+                disabled={loading}
+                className="btn btn-ghost btn-sm"
+                title="Remove image"
+              >
+                Remove
+              </button>
             </div>
           </div>
 
@@ -936,110 +607,32 @@ const UploadSection = ({
               FILE INFORMATION
           ================================================= */}
 
-          <div
-            className="
-              group
-              flex
-              items-center
-              justify-between
-              gap-3
-              rounded-xl
-              border
-              p-3.5
-
-              border-slate-200
-              bg-slate-50
-
-              transition-all
-              duration-300
-
-              hover:border-indigo-200
-              hover:bg-indigo-50/50
-
-              dark:border-slate-700
-              dark:bg-slate-800
-
-              dark:hover:border-indigo-500/30
-              dark:hover:bg-indigo-500/5
-            "
-          >
-            <div className="flex min-w-0 items-center gap-3">
-
-              <div
-                className="
-                  flex
-                  h-10
-                  w-10
-                  shrink-0
-                  items-center
-                  justify-center
-                  rounded-xl
-
-                  bg-indigo-50
-                  text-indigo-600
-
-                  dark:bg-indigo-500/10
-                  dark:text-indigo-400
-
-                  transition-transform
-                  duration-300
-
-                  group-hover:scale-105
-                "
-              >
-                <FileImage size={19} />
-              </div>
-
-              <div className="min-w-0">
+          <div className="caption">
+            <div className="row row-between">
+              <div style={{ minWidth: 0 }}>
                 <p
-                  className="
-                    truncate
-                    text-sm
-                    font-semibold
-
-                    text-slate-800
-
-                    dark:text-white
-                  "
+                  className="fw-semibold"
+                  style={{
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
                 >
                   {selectedFile?.name}
                 </p>
 
-                <p
-                  className="
-                    mt-0.5
-                    text-xs
-
-                    text-slate-500
-
-                    dark:text-slate-400
-                  "
-                >
+                <p className="hint">
                   {selectedFile
-                    ? (
-                        selectedFile.size /
-                        1024 /
-                        1024
-                      ).toFixed(2)
+                    ? (selectedFile.size / 1024 / 1024).toFixed(2)
                     : "0.00"}{" "}
                   MB
                   {" • "}
-                  {selectedFile?.type
-                    ?.split("/")[1]
-                    ?.toUpperCase()}
+                  {selectedFile?.type?.split("/")[1]?.toUpperCase()}
                 </p>
               </div>
+
+              <span className="badge badge-ok">Ready</span>
             </div>
-
-            <CheckCircle
-              size={20}
-              className="
-                shrink-0
-                text-emerald-500
-
-                dark:text-emerald-400
-              "
-            />
           </div>
 
           {/* =================================================
@@ -1050,105 +643,9 @@ const UploadSection = ({
             type="button"
             onClick={handlePredict}
             disabled={loading}
-            className="
-              group
-              relative
-              flex
-              w-full
-              items-center
-              justify-center
-              gap-2.5
-              overflow-hidden
-              rounded-xl
-              bg-indigo-600
-              px-5
-              py-3.5
-              text-sm
-              font-semibold
-              text-white
-
-              shadow-lg
-              shadow-indigo-500/20
-
-              transition-all
-              duration-300
-
-              hover:-translate-y-0.5
-              hover:bg-indigo-700
-              hover:shadow-xl
-              hover:shadow-indigo-500/30
-
-              active:translate-y-0
-              active:scale-[0.98]
-
-              disabled:cursor-not-allowed
-              disabled:opacity-60
-              disabled:hover:translate-y-0
-              disabled:hover:shadow-lg
-            "
+            className="btn btn-primary btn-block"
           >
-            {/* Shine */}
-
-            {!loading && (
-              <span
-                className="
-                  absolute
-                  inset-0
-                  -translate-x-full
-                  bg-gradient-to-r
-                  from-transparent
-                  via-white/10
-                  to-transparent
-
-                  transition-transform
-                  duration-700
-
-                  group-hover:translate-x-full
-                "
-              />
-            )}
-
-            {loading ? (
-              <>
-                <Loader2
-                  size={19}
-                  className="animate-spin"
-                />
-
-                <span>
-                  Analyzing Image...
-                </span>
-              </>
-            ) : (
-              <>
-                <Sparkles
-                  size={18}
-                  className="
-                    transition-transform
-                    duration-300
-
-                    group-hover:rotate-12
-                    group-hover:scale-110
-                  "
-                />
-
-                <span>
-                  Predict Image
-                </span>
-
-                <span
-                  className="
-                    text-indigo-200
-                    transition-transform
-                    duration-300
-
-                    group-hover:translate-x-1
-                  "
-                >
-                  →
-                </span>
-              </>
-            )}
+            {loading ? "Analyzing image..." : "Predict image"}
           </button>
 
           {/* Reset */}
@@ -1157,46 +654,9 @@ const UploadSection = ({
             type="button"
             onClick={handleRemove}
             disabled={loading}
-            className="
-              flex
-              w-full
-              items-center
-              justify-center
-              gap-2
-              rounded-xl
-              border
-              border-slate-200
-              bg-white
-              px-5
-              py-3
-              text-sm
-              font-medium
-              text-slate-600
-
-              transition-all
-              duration-200
-
-              hover:border-slate-300
-              hover:bg-slate-50
-              hover:text-slate-900
-
-              active:scale-[0.98]
-
-              dark:border-slate-700
-              dark:bg-slate-900
-              dark:text-slate-400
-
-              dark:hover:border-slate-600
-              dark:hover:bg-slate-800
-              dark:hover:text-white
-
-              disabled:cursor-not-allowed
-              disabled:opacity-50
-            "
+            className="btn btn-ghost btn-block"
           >
-            <RotateCcw size={16} />
-
-            Choose Another Image
+            Choose another image
           </button>
         </div>
       )}
@@ -1206,74 +666,9 @@ const UploadSection = ({
       ================================================= */}
 
       {message && (
-        <div
-          className="
-            mt-4
-            flex
-            items-start
-            gap-3
-            rounded-xl
-            border
-
-            border-emerald-200
-            bg-emerald-50
-
-            p-4
-
-            shadow-sm
-            shadow-emerald-500/5
-
-            dark:border-emerald-500/20
-            dark:bg-emerald-500/10
-          "
-        >
-          <div
-            className="
-              flex
-              h-8
-              w-8
-              shrink-0
-              items-center
-              justify-center
-              rounded-lg
-
-              bg-emerald-100
-              text-emerald-600
-
-              dark:bg-emerald-500/10
-              dark:text-emerald-400
-            "
-          >
-            <CheckCircle size={17} />
-          </div>
-
-          <div>
-            <p
-              className="
-                text-sm
-                font-semibold
-
-                text-emerald-700
-
-                dark:text-emerald-400
-              "
-            >
-              Prediction Successful
-            </p>
-
-            <p
-              className="
-                mt-1
-                text-xs
-
-                text-emerald-600/80
-
-                dark:text-emerald-400/70
-              "
-            >
-              {message}
-            </p>
-          </div>
+        <div className="alert alert-ok">
+          <b>Prediction successful</b>
+          {message}
         </div>
       )}
 
@@ -1282,75 +677,9 @@ const UploadSection = ({
       ================================================= */}
 
       {error && (
-        <div
-          className="
-            mt-4
-            flex
-            items-start
-            gap-3
-            rounded-xl
-            border
-
-            border-red-200
-            bg-red-50
-
-            p-4
-
-            shadow-sm
-            shadow-red-500/5
-
-            dark:border-red-500/20
-            dark:bg-red-500/10
-          "
-        >
-          <div
-            className="
-              flex
-              h-8
-              w-8
-              shrink-0
-              items-center
-              justify-center
-              rounded-lg
-
-              bg-red-100
-              text-red-600
-
-              dark:bg-red-500/10
-              dark:text-red-400
-            "
-          >
-            <AlertCircle size={17} />
-          </div>
-
-          <div>
-            <p
-              className="
-                text-sm
-                font-semibold
-
-                text-red-700
-
-                dark:text-red-400
-              "
-            >
-              Prediction Failed
-            </p>
-
-            <p
-              className="
-                mt-1
-                text-xs
-                leading-5
-
-                text-red-600
-
-                dark:text-red-300
-              "
-            >
-              {error}
-            </p>
-          </div>
+        <div className="alert alert-err">
+          <b>Prediction failed</b>
+          {error}
         </div>
       )}
     </div>

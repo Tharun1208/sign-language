@@ -1,0 +1,15 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+dataset/
+uploads/
+.git/
+.gitignore
+.env
+test_hand.py
+collect_data.py
+train_model.py
+train_model_v2.py
+package-lock.json
+app_monolith_backup.py

@@ -4,3 +4,8 @@ __pycache__/
 dataset/
 models/*.pkl
 uploads/
+data/
+users.json
+feedback.json
+*.tmp
+*.lock
