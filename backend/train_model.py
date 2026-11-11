@@ -9,6 +9,7 @@ from sklearn.metrics import (
     accuracy_score,
     classification_report
 )
+from signai.features import WRIST_CENTERED, extract_landmark_features
 
 
 # ============================================================
@@ -103,32 +104,13 @@ def extract_landmarks(image_path):
 
     hand = results.multi_hand_landmarks[0]
 
-    wrist = hand.landmark[0]
-
-    features = []
-
-    for landmark in hand.landmark:
-
-        x = landmark.x - wrist.x
-        y = landmark.y - wrist.y
-        z = landmark.z - wrist.z
-
-        features.extend([
-            x,
-            y,
-            z
-        ])
-
-    features = np.array(
-        features,
-        dtype=np.float32
-    )
+    features = extract_landmark_features(hand)
 
     # --------------------------------------------------------
     # Safety check
     # --------------------------------------------------------
 
-    if len(features) != 63:
+    if features is None or len(features) != 63:
         return None
 
     return features
@@ -642,6 +624,9 @@ def main():
 
         "feature_description":
             "MediaPipe hand landmarks normalized relative to wrist",
+
+        "feature_preprocessing":
+            WRIST_CENTERED,
 
         "classes":
             len(LABELS),

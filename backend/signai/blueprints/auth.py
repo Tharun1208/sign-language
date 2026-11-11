@@ -6,6 +6,7 @@ Serves:
     /settings (profile)      -> /api/auth/me, /logout, /profile
 """
 
+import logging
 import secrets
 import time
 
@@ -16,6 +17,42 @@ from .. import config, security, state, storage
 from ..utils import public_user
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
+logger = logging.getLogger("signai.auth")
+
+
+def _auth_rate_limited():
+    now = time.monotonic()
+    cutoff = now - config.AUTH_RATE_LIMIT_WINDOW_SECONDS
+    address = request.remote_addr or "unknown"
+
+    with state.AUTH_ATTEMPTS_LOCK:
+        if len(state.AUTH_ATTEMPTS) > 1000:
+            state.AUTH_ATTEMPTS = {
+                client: values
+                for client, values in state.AUTH_ATTEMPTS.items()
+                if any(timestamp > cutoff for timestamp in values)
+            }
+        attempts = [
+            timestamp
+            for timestamp in state.AUTH_ATTEMPTS.get(address, [])
+            if timestamp > cutoff
+        ]
+        if len(attempts) >= config.AUTH_RATE_LIMIT_ATTEMPTS:
+            state.AUTH_ATTEMPTS[address] = attempts
+            return True
+
+        attempts.append(now)
+        state.AUTH_ATTEMPTS[address] = attempts
+        return False
+
+
+def _rate_limit_response():
+    if _auth_rate_limited():
+        return jsonify({
+            "success": False,
+            "message": "Too many authentication attempts. Try again later.",
+        }), 429
+    return None
 
 
 def _validate_email(email):
@@ -29,10 +66,14 @@ def _validate_email(email):
 @auth_bp.route("/register", methods=["POST"])
 def register():
 
+    limited = _rate_limit_response()
+    if limited:
+        return limited
+
     try:
         data = request.get_json(silent=True)
 
-        if not data:
+        if not isinstance(data, dict):
             return jsonify({"success": False, "message": "Request body is missing."}), 400
 
         full_name = str(data.get("fullName", "")).strip()
@@ -71,30 +112,24 @@ def register():
             "picture": "",
             "profileImage": "",
             "image": "",
-            "emailVerified": True,
+            "emailVerified": False,
             "provider": "email",
             "createdAt": time.time(),
         }
 
-        users = storage.load_users()
-        users.append(user)
-
-        if not storage.save_users(users):
+        create_result = storage.create_user(user)
+        if create_result == "exists":
+            return jsonify({
+                "success": False,
+                "message": "An account with this email already exists.",
+            }), 409
+        if create_result != "created":
             return jsonify({"success": False, "message": "Unable to save your account."}), 500
 
         safe_user = public_user(user)
 
         # The front end persists a token straight after register, so issue one.
         token = security.create_auth_token(safe_user)
-
-        print()
-        print("=" * 70)
-        print("NEW USER REGISTERED")
-        print("=" * 70)
-        print(f"User ID:  {user['id']}")
-        print(f"Email:    {user['email']}")
-        print("=" * 70)
-        print()
 
         return jsonify({
             "success": True,
@@ -104,11 +139,10 @@ def register():
         }), 201
 
     except Exception as error:
-        print("Registration Error:", error)
+        logger.error("Registration failed (%s)", type(error).__name__)
         return jsonify({
             "success": False,
             "message": "Registration failed.",
-            "error": str(error),
         }), 500
 
 
@@ -119,10 +153,14 @@ def register():
 @auth_bp.route("/login", methods=["POST"])
 def email_login():
 
+    limited = _rate_limit_response()
+    if limited:
+        return limited
+
     try:
         data = request.get_json(silent=True)
 
-        if not data:
+        if not isinstance(data, dict):
             return jsonify({"success": False, "message": "Request body is missing."}), 400
 
         email = str(data.get("email", "")).strip().lower()
@@ -151,14 +189,6 @@ def email_login():
         safe_user = public_user(user)
         token = security.create_auth_token(safe_user)
 
-        print()
-        print("=" * 70)
-        print("EMAIL LOGIN")
-        print("=" * 70)
-        print(f"Email: {safe_user['email']}")
-        print("=" * 70)
-        print()
-
         return jsonify({
             "success": True,
             "message": "Login successful.",
@@ -167,11 +197,10 @@ def email_login():
         }), 200
 
     except Exception as error:
-        print("Email Login Error:", error)
+        logger.error("Email login failed (%s)", type(error).__name__)
         return jsonify({
             "success": False,
             "message": "Login failed.",
-            "error": str(error),
         }), 500
 
 
@@ -182,6 +211,10 @@ def email_login():
 @auth_bp.route("/google", methods=["POST"])
 def google_login():
 
+    limited = _rate_limit_response()
+    if limited:
+        return limited
+
     try:
         if not config.GOOGLE_CLIENT_ID:
             return jsonify({
@@ -191,7 +224,7 @@ def google_login():
 
         data = request.get_json(silent=True)
 
-        if not data:
+        if not isinstance(data, dict):
             return jsonify({"success": False, "message": "Request body is missing."}), 400
 
         credential = data.get("credential")
@@ -209,7 +242,7 @@ def google_login():
                 config.GOOGLE_CLIENT_ID,
             )
         except ValueError as error:
-            print("Google token verification failed:", error)
+            logger.warning("Google token verification failed")
             return jsonify({
                 "success": False,
                 "message": "Invalid or expired Google credential.",
@@ -249,6 +282,18 @@ def google_login():
         existing = storage.find_user_by_email(email)
 
         if existing:
+            if (
+                existing.get("provider") != "google"
+                or existing.get("googleId") != google_id
+            ):
+                return jsonify({
+                    "success": False,
+                    "message": (
+                        "An account already uses this email. "
+                        "Sign in with that account's existing method."
+                    ),
+                }), 409
+
             user = existing
             user.update({
                 "name": name,
@@ -270,7 +315,11 @@ def google_login():
                     users[index] = user
                     break
 
-            storage.save_users(users)
+            if not storage.save_users(users):
+                return jsonify({
+                    "success": False,
+                    "message": "Unable to update Google account.",
+                }), 500
 
         else:
             user = {
@@ -293,23 +342,17 @@ def google_login():
                 "createdAt": time.time(),
             }
 
-            users = storage.load_users()
-            users.append(user)
-
-            if not storage.save_users(users):
+            create_result = storage.create_user(user)
+            if create_result == "exists":
+                return jsonify({
+                    "success": False,
+                    "message": "An account with this email already exists.",
+                }), 409
+            if create_result != "created":
                 return jsonify({"success": False, "message": "Unable to save Google account."}), 500
 
         safe_user = public_user(user)
         token = security.create_auth_token(safe_user)
-
-        print()
-        print("=" * 70)
-        print("GOOGLE LOGIN")
-        print("=" * 70)
-        print(f"Email:     {email}")
-        print(f"Google ID: {google_id}")
-        print("=" * 70)
-        print()
 
         return jsonify({
             "success": True,
@@ -319,11 +362,10 @@ def google_login():
         }), 200
 
     except Exception as error:
-        print("Google Login Error:", error)
+        logger.error("Google login failed (%s)", type(error).__name__)
         return jsonify({
             "success": False,
             "message": "Google login failed.",
-            "error": str(error),
         }), 500
 
 
@@ -380,7 +422,12 @@ def update_profile():
             }), 401
 
         token = security.token_from_request(request)
-        data = request.get_json(silent=True) or {}
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({
+                "success": False,
+                "message": "A JSON request body is required.",
+            }), 400
 
         user_id = str(record["user"].get("id", ""))
         users = storage.load_users()
@@ -432,9 +479,8 @@ def update_profile():
         }), 200
 
     except Exception as error:
-        print("Update profile error:", error)
+        logger.error("Profile update failed (%s)", type(error).__name__)
         return jsonify({
             "success": False,
             "message": "Failed to update profile.",
-            "error": str(error),
         }), 500

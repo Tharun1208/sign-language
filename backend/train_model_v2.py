@@ -7,6 +7,10 @@ import mediapipe as mp
 from concurrent.futures import ThreadPoolExecutor
 from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
 from sklearn.metrics import accuracy_score, classification_report
+from signai.features import (
+    WRIST_CENTERED_SCALE_NORMALIZED,
+    extract_landmark_features,
+)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATASET_DIR = os.path.join(BASE_DIR, "dataset")
@@ -29,26 +33,10 @@ def extract_scale_invariant_features(image_rgb, hands_detector):
     if not results.multi_hand_landmarks:
         return None
     
-    hand = results.multi_hand_landmarks[0]
-    wrist = hand.landmark[0]
-    
-    # 21 landmarks relative to wrist
-    raw_coords = []
-    for lm in hand.landmark:
-        raw_coords.append([lm.x - wrist.x, lm.y - wrist.y, lm.z - wrist.z])
-    
-    coords = np.array(raw_coords, dtype=np.float32)
-    
-    # Scale normalization: Hand radius (max euclidean distance from wrist)
-    distances = np.linalg.norm(coords, axis=1)
-    max_radius = np.max(distances)
-    
-    if max_radius > 1e-6:
-        coords = coords / max_radius
-    else:
-        return None
-    
-    return coords.flatten()
+    return extract_landmark_features(
+        results.multi_hand_landmarks[0],
+        normalize_scale=True,
+    )
 
 def process_image_path(args):
     path, label = args
@@ -198,6 +186,7 @@ def main():
         "feature_count": 63,
         "scale_normalized": True,
         "hand_invariant": True,
+        "feature_preprocessing": WRIST_CENTERED_SCALE_NORMALIZED,
         "performance": {
             "training_accuracy": float(train_acc),
             "training_accuracy_percent": round(train_acc * 100, 2),
@@ -211,6 +200,7 @@ def main():
             "algorithm": "Random Forest",
             "n_estimators": 300,
             "feature_count": 63,
+            "feature_preprocessing": WRIST_CENTERED_SCALE_NORMALIZED,
             "classes": 26,
             "labels": LABELS,
             "trained_at": time.strftime("%Y-%m-%d %H:%M:%S")

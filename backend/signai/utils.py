@@ -68,7 +68,7 @@ def public_user(user):
     if not isinstance(user, dict):
         return {}
 
-    return {
+    result = {
         "id": str(user.get("id", "")),
         "name": user.get("name") or user.get("fullName") or "",
         "fullName": user.get("fullName") or user.get("name") or "",
@@ -83,3 +83,9 @@ def public_user(user):
         "emailVerified": bool(user.get("emailVerified", True)),
         "provider": user.get("provider", "email"),
     }
+
+    role = str(user.get("role", "")).strip().lower()
+    if role in {"moderator", "admin"}:
+        result["role"] = role
+
+    return result

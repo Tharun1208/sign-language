@@ -8,12 +8,15 @@ Serves:
     /analytics             -> /api/model-info, /api/health
 """
 
+import logging
+
 from flask import Blueprint, jsonify, request
 
-from .. import config, state
+from .. import config, security, state
 from ..services import inference
 
 recognition_bp = Blueprint("recognition", __name__, url_prefix="/api")
+logger = logging.getLogger("signai.recognition")
 
 
 def _decode_upload(uploaded_file, max_bytes):
@@ -150,16 +153,20 @@ def predict():
             payload, status = error
             return jsonify(payload), status
 
-        response, status_code = inference.process_prediction(image, source="image")
+        record = security.current_auth(request)
+        response, status_code = inference.process_prediction(
+            image,
+            source="image",
+            user_id=record["user"].get("id") if record else None,
+        )
 
         return jsonify(response), status_code
 
     except Exception as error:
-        print("Image prediction error:", error)
+        logger.error("Image prediction failed (%s)", type(error).__name__)
         return jsonify({
             "success": False,
             "message": "Prediction failed.",
-            "error": str(error),
         }), 500
 
 
@@ -201,11 +208,10 @@ def predict_frame():
         return jsonify(response), status_code
 
     except Exception as error:
-        print("Live frame prediction error:", error)
+        logger.error("Live frame prediction failed (%s)", type(error).__name__)
         return jsonify({
             "success": False,
             "message": "Live prediction failed.",
-            "error": str(error),
         }), 500
 
 
@@ -216,21 +222,49 @@ def predict_frame():
 @recognition_bp.route("/predictions", methods=["GET"])
 def get_predictions():
 
+    record = security.current_auth(request)
+    if not record:
+        return jsonify({
+            "success": False,
+            "message": "Authentication is required.",
+        }), 401
+
+    user_id = str(record["user"].get("id", ""))
     with state.PREDICTIONS_LOCK:
-        snapshot = list(state.PREDICTIONS)
+        snapshot = [
+            item
+            for item in state.PREDICTIONS
+            if item.get("_user_id") == user_id
+        ]
+    public_items = [
+        {key: value for key, value in item.items() if key != "_user_id"}
+        for item in snapshot
+    ]
 
     return jsonify({
         "success": True,
-        "predictions": snapshot,
-        "count": len(snapshot),
+        "predictions": public_items,
+        "count": len(public_items),
     })
 
 
 @recognition_bp.route("/predictions", methods=["DELETE"])
 def clear_predictions():
 
+    record = security.current_auth(request)
+    if not record:
+        return jsonify({
+            "success": False,
+            "message": "Authentication is required.",
+        }), 401
+
+    user_id = str(record["user"].get("id", ""))
     with state.PREDICTIONS_LOCK:
-        state.PREDICTIONS = []
+        state.PREDICTIONS = [
+            item
+            for item in state.PREDICTIONS
+            if item.get("_user_id") != user_id
+        ]
 
     return jsonify({
         "success": True,

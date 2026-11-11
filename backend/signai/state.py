@@ -17,7 +17,11 @@ from . import config
 # token -> {"user": {...}, "created_at": float}
 AUTH_TOKENS = {}
 
+AUTH_LOCK = threading.Lock()
+
 USERS_LOCK = threading.Lock()
+AUTH_ATTEMPTS = {}
+AUTH_ATTEMPTS_LOCK = threading.Lock()
 
 
 # ============================================================
@@ -102,6 +106,9 @@ RECOGNITION_SESSIONS = {}
 VIDEO_JOBS = {}
 
 VIDEO_LOCK = threading.Lock()
+VIDEO_UPLOAD_ATTEMPTS = {}
+VIDEO_UPLOAD_LOCK = threading.Lock()
+VIDEO_SLOTS = threading.BoundedSemaphore(config.MAX_CONCURRENT_VIDEO_JOBS)
 
 
 # ============================================================

@@ -37,10 +37,9 @@ def create_app(load_model=True):
     print("=" * 70)
     print("STORAGE ENGINE")
     print("=" * 70)
-    print(f"Engine:   {'MongoDB (' + config.MONGO_DB_NAME + ')' if is_mongo_active() else 'JSON File Fallback'}")
-    print(f"URI:      {config.MONGO_URI if is_mongo_active() else config.USERS_FILE}")
+    print(f"Engine:   {'MongoDB' if is_mongo_active() else 'JSON File Fallback'}")
+    print(f"Database: {config.MONGO_DB_NAME if is_mongo_active() else 'local JSON'}")
     print(f"Users:    {len(load_users())}")
-    print(f"Feedback: {config.FEEDBACK_FILE}")
     print("=" * 70)
     print()
 

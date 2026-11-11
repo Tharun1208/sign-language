@@ -136,14 +136,16 @@ const Login = () => {
             <Sparkles size={12} />
             AI-Powered ISL Recognition
           </span>
-          <h2 className="mt-4">Bridge communication in real time.</h2>
-          <p className="mt-3 text-soft">
+          <h2 className="mt-3" style={{ fontSize: "clamp(1.75rem, 2.6vw, 2.4rem)", lineHeight: 1.15 }}>
+            Bridge communication in real time.
+          </h2>
+          <p className="mt-2 text-soft" style={{ fontSize: "0.875rem", lineHeight: 1.45 }}>
             Instant sign language detection, intelligent sentence formation,
             and complete session history in one connected platform.
           </p>
 
-          <div style={{ maxWidth: 360, display: "flex", flexDirection: "column", gap: 14, marginTop: 24 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          <div style={{ maxWidth: 360, display: "flex", flexDirection: "column", gap: 12, marginTop: 18 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               {[
                 ["26", "A–Z Alphabets"],
                 ["93.6%", "Model Accuracy"],
@@ -155,7 +157,7 @@ const Login = () => {
                     background: "rgba(255,255,255,0.08)",
                     borderColor: "rgba(255,255,255,0.14)",
                     boxShadow: "none",
-                    padding: 16,
+                    padding: "12px 14px",
                     margin: 0,
                   }}
                   initial={{ opacity: 0, y: 18 }}
@@ -164,11 +166,11 @@ const Login = () => {
                 >
                   <div
                     className="stat-value"
-                    style={{ color: "#fff", fontSize: "var(--fs-xl)", marginTop: 0 }}
+                    style={{ color: "#fff", fontSize: "1.35rem", marginTop: 0 }}
                   >
                     {value}
                   </div>
-                  <div className="text-xs" style={{ color: "rgba(245,242,255,0.66)", marginTop: 4 }}>
+                  <div className="text-xs" style={{ color: "rgba(245,242,255,0.66)", marginTop: 2 }}>
                     {label}
                   </div>
                 </motion.div>
@@ -178,7 +180,7 @@ const Login = () => {
             <div
               className="auth-demo card"
               style={{
-                padding: 16,
+                padding: "12px 14px",
                 background: "rgba(255,255,255,0.08)",
                 borderColor: "rgba(255,255,255,0.16)",
                 boxShadow: "none",
@@ -189,7 +191,7 @@ const Login = () => {
                 <span className="text-xs" style={{ color: "rgba(245,242,255,0.7)" }}>
                   Live detection preview
                 </span>
-                <span className="badge badge-ok">Ready</span>
+                <span className="badge badge-ok" style={{ fontSize: "0.7rem", padding: "1px 6px" }}>Ready</span>
               </div>
               <div className="row mt-2" style={{ gap: 6 }}>
                 {["S", "I", "G", "N", "A", "I"].map((letter, idx) => (
@@ -200,13 +202,14 @@ const Login = () => {
                       background: "rgba(255,255,255,0.16)",
                       color: "#fff",
                       fontFamily: "var(--font-display)",
-                      fontSize: "0.85rem",
+                      fontSize: "0.8rem",
+                      padding: "2px 7px",
                     }}
                   >
                     {letter}
                   </span>
                 ))}
-                <span className="badge badge-primary">94%</span>
+                <span className="badge badge-primary" style={{ fontSize: "0.75rem", padding: "2px 6px" }}>94%</span>
               </div>
             </div>
           </div>
@@ -221,23 +224,23 @@ const Login = () => {
 
       {/* Form Panel (Right) */}
       <section className="auth-form-side">
-        <div className="auth-card" style={{ width: "min(460px, 100%)" }}>
-          <div className="row mb-4" style={{ justifyContent: "flex-end" }}>
+        <div className="auth-card" style={{ width: "min(440px, 100%)" }}>
+          <div className="row mb-2" style={{ justifyContent: "flex-end" }}>
             <ThemeToggle />
           </div>
 
-          <div className="card" style={{ padding: "clamp(24px, 4vw, 36px)" }}>
-            <span className="eyebrow">Sign In</span>
-            <h1 className="mt-1" style={{ fontSize: "var(--fs-2xl)" }}>
+          <div className="card" style={{ padding: "clamp(20px, 2.8vh, 28px) clamp(20px, 3vw, 32px)" }}>
+            <span className="eyebrow" style={{ fontSize: "0.75rem" }}>Sign In</span>
+            <h1 className="mt-1" style={{ fontSize: "clamp(1.35rem, 2vw, 1.65rem)", lineHeight: 1.2 }}>
               Welcome back
             </h1>
-            <p className="text-sm text-soft mt-1">
+            <p className="text-xs text-soft mt-1">
               Enter your credentials to access your SignAI workspace.
             </p>
 
             {error && (
-              <div className="alert alert-err mt-4" role="alert">
-                <AlertCircle size={16} className="shrink-0" />
+              <div className="alert alert-err mt-3" style={{ padding: "8px 12px", fontSize: "0.8rem" }} role="alert">
+                <AlertCircle size={15} className="shrink-0" />
                 <div>
                   <b>Could not sign in</b>
                   <div>{error}</div>
@@ -246,8 +249,8 @@ const Login = () => {
             )}
 
             {success && (
-              <div className="alert alert-ok mt-4" role="status">
-                <CheckCircle2 size={16} className="shrink-0" />
+              <div className="alert alert-ok mt-3" style={{ padding: "8px 12px", fontSize: "0.8rem" }} role="status">
+                <CheckCircle2 size={15} className="shrink-0" />
                 <div>
                   <b>Success</b>
                   <div>{success}</div>
@@ -255,9 +258,9 @@ const Login = () => {
               </div>
             )}
 
-            <form onSubmit={handleLogin} className="mt-4" noValidate>
+            <form onSubmit={handleLogin} className="mt-3" noValidate>
               <div className="field">
-                <label className="label" htmlFor="login-email">
+                <label className="label" htmlFor="login-email" style={{ fontSize: "0.8rem", marginBottom: 4 }}>
                   Email address
                 </label>
                 <input
@@ -273,18 +276,19 @@ const Login = () => {
                     setError("");
                   }}
                   required
+                  style={{ height: 38, fontSize: "0.875rem" }}
                 />
               </div>
 
-              <div className="field">
+              <div className="field" style={{ marginTop: 10 }}>
                 <div className="row row-between mb-1">
-                  <label className="label" htmlFor="login-password" style={{ marginBottom: 0 }}>
+                  <label className="label" htmlFor="login-password" style={{ marginBottom: 0, fontSize: "0.8rem" }}>
                     Password
                   </label>
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm"
-                    style={{ padding: "2px 6px", fontSize: "var(--fs-xs)" }}
+                    style={{ padding: "0 4px", fontSize: "0.75rem" }}
                     onClick={() =>
                       setError("Password reset is not configured yet. Please contact support.")
                     }
@@ -306,23 +310,24 @@ const Login = () => {
                       setError("");
                     }}
                     required
-                    style={{ paddingRight: 74 }}
+                    style={{ paddingRight: 64, height: 38, fontSize: "0.875rem" }}
                   />
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm"
-                    style={{ position: "absolute", right: 6, top: 6, bottom: 6 }}
+                    style={{ position: "absolute", right: 4, top: 4, bottom: 4, padding: "0 6px" }}
                     onClick={() => setShowPassword((v) => !v)}
                     aria-label={showPassword ? "Hide password" : "Show password"}
                   >
-                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
                   </button>
                 </div>
               </div>
 
               <button
                 type="submit"
-                className="btn btn-primary btn-block btn-lg mt-5"
+                className="btn btn-primary btn-block mt-4"
+                style={{ height: 40, fontSize: "0.875rem" }}
                 disabled={isLoading}
               >
                 {isLoading ? (
@@ -332,16 +337,16 @@ const Login = () => {
                   </>
                 ) : (
                   <>
-                    <LogIn size={17} />
+                    <LogIn size={16} />
                     <span>Sign In</span>
                   </>
                 )}
               </button>
             </form>
 
-            <div className="divider mt-6 mb-4" />
+            <div className="divider mt-4 mb-3" />
 
-            <p className="text-sm text-soft" style={{ textAlign: "center" }}>
+            <p className="text-xs text-soft" style={{ textAlign: "center" }}>
               Don't have an account?{" "}
               <Link to="/register" style={{ fontWeight: "var(--fw-semibold)" }}>
                 Create an account
@@ -349,15 +354,15 @@ const Login = () => {
             </p>
 
             <div
-              className="row mt-4"
+              className="row mt-3"
               style={{
                 justifyContent: "center",
                 gap: 6,
                 color: "var(--ink-3)",
-                fontSize: "var(--fs-xs)",
+                fontSize: "0.725rem",
               }}
             >
-              <ShieldCheck size={14} style={{ color: "var(--ok)" }} />
+              <ShieldCheck size={13} style={{ color: "var(--ok)" }} />
               <span>Secure encrypted session</span>
             </div>
           </div>

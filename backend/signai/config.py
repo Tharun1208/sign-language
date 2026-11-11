@@ -39,6 +39,9 @@ FEEDBACK_FILE = os.getenv(
     os.path.join(os.path.dirname(USERS_FILE), "feedback.json"),
 )
 
+LEGACY_USERS_FILE = os.path.join(BASE_DIR, "users.json")
+LEGACY_FEEDBACK_FILE = os.path.join(BASE_DIR, "feedback.json")
+
 VIDEO_DIR = os.path.join(BASE_DIR, "uploads", "videos")
 
 
@@ -110,6 +113,31 @@ USER_PUBLIC_FIELDS = (
     "emailVerified",
     "provider",
 )
+
+FEEDBACK_MODERATOR_EMAILS = {
+    email.strip().lower()
+    for email in os.getenv("FEEDBACK_MODERATOR_EMAILS", "").split(",")
+    if email.strip()
+}
+
+AUTH_TOKEN_TTL_SECONDS = int(os.getenv("AUTH_TOKEN_TTL_SECONDS", "43200"))
+AUTH_RATE_LIMIT_ATTEMPTS = int(os.getenv("AUTH_RATE_LIMIT_ATTEMPTS", "10"))
+AUTH_RATE_LIMIT_WINDOW_SECONDS = int(
+    os.getenv("AUTH_RATE_LIMIT_WINDOW_SECONDS", "900")
+)
+
+
+# ============================================================
+# VIDEO JOB LIMITS
+# ============================================================
+
+MAX_VIDEO_UPLOAD_BYTES = 150 * 1024 * 1024
+MAX_CONCURRENT_VIDEO_JOBS = 2
+VIDEO_UPLOAD_RATE_LIMIT = 5
+VIDEO_UPLOAD_RATE_WINDOW_SECONDS = 60
+VIDEO_JOB_RETENTION_SECONDS = 3600
+VIDEO_STALE_FILE_RETENTION_SECONDS = 86400
+MAX_VIDEO_DURATION_SECONDS = 600
 
 
 # ============================================================

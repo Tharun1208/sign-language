@@ -1,8 +1,8 @@
 """
 Model loading + the single inference path used by every page.
 
-Pipeline:  image -> MediaPipe landmarks -> wrist-centred, scale
-normalised 63-vector -> Random Forest -> label + confidence + top 5.
+Pipeline:  image -> MediaPipe landmarks -> model-compatible wrist-relative
+63-vector -> Random Forest -> label + confidence + top 5.
 """
 
 import gc
@@ -13,6 +13,11 @@ import joblib
 import numpy as np
 
 from .. import config, state
+from ..features import (
+    WRIST_CENTERED_SCALE_NORMALIZED,
+    extract_landmark_features,
+    model_feature_preprocessing,
+)
 from ..utils import format_accuracy, get_sign_metrics
 
 
@@ -44,7 +49,18 @@ def load_model():
         if model is None:
             raise ValueError("The model file does not contain a 'model' object.")
 
+        feature_count = int(bundle.get("feature_count", 63))
+        model_feature_count = getattr(model, "n_features_in_", feature_count)
+        if feature_count != model_feature_count:
+            raise ValueError("Model feature count does not match its bundle.")
+
         labels = bundle.get("labels") or config.DEFAULT_LABELS
+        classes = getattr(model, "classes_", None)
+        if classes is not None and set(map(str, classes)) != set(map(str, labels)):
+            raise ValueError("Model classes do not match the bundle labels.")
+
+        model_feature_preprocessing(bundle)
+
         performance = bundle.get("performance") or {}
 
         if not isinstance(performance, dict):
@@ -97,7 +113,7 @@ def load_model():
         print()
         print("MODEL LOADING FAILED")
         print("-" * 70)
-        print(f"Error: {error}")
+        print(f"Error: {type(error).__name__}")
         print("-" * 70)
         print()
 
@@ -150,22 +166,17 @@ def extract_landmarks_from_image(image):
         if not results.multi_hand_landmarks:
             return None
 
-        hand = results.multi_hand_landmarks[0]
-        wrist = hand.landmark[0]
+        normalize_scale = (
+            model_feature_preprocessing(state.MODEL_DATA)
+            == WRIST_CENTERED_SCALE_NORMALIZED
+        )
+        features = extract_landmark_features(
+            results.multi_hand_landmarks[0],
+            normalize_scale=normalize_scale,
+        )
 
-        raw_coords = [
-            [lm.x - wrist.x, lm.y - wrist.y, lm.z - wrist.z]
-            for lm in hand.landmark
-        ]
-
-        coords = np.array(raw_coords, dtype=np.float32)
-
-        max_radius = float(np.max(np.linalg.norm(coords, axis=1)))
-
-        if max_radius <= 1e-6:
+        if features is None:
             return None
-
-        features = (coords / max_radius).flatten()
 
         if features.shape[0] != 63:
             print(f"Invalid feature count: {features.shape[0]}")
@@ -174,7 +185,7 @@ def extract_landmarks_from_image(image):
         return features.reshape(1, -1)
 
     except Exception as error:
-        print("Landmark extraction error:", error)
+        print("Landmark extraction failed:", type(error).__name__)
         return None
 
 
@@ -182,15 +193,23 @@ def extract_landmarks_from_image(image):
 # PREDICT
 # ============================================================
 
-def save_prediction(response):
+def save_prediction(response, user_id=None):
     with state.PREDICTIONS_LOCK:
-        state.PREDICTIONS.insert(0, response)
+        saved = dict(response)
+        saved["_user_id"] = str(user_id) if user_id else None
+        state.PREDICTIONS.insert(0, saved)
 
         if len(state.PREDICTIONS) > config.MAX_PREDICTIONS:
             state.PREDICTIONS = state.PREDICTIONS[: config.MAX_PREDICTIONS]
 
 
-def process_prediction(image, source="image", save=True, verbose=True):
+def process_prediction(
+    image,
+    source="image",
+    save=True,
+    verbose=True,
+    user_id=None,
+):
     """Run the full pipeline. Returns (payload, http_status)."""
 
     started = time.perf_counter()
@@ -297,7 +316,7 @@ def process_prediction(image, source="image", save=True, verbose=True):
         }
 
         if save:
-            save_prediction(response)
+            save_prediction(response, user_id=user_id)
 
         if verbose:
             print()
@@ -318,14 +337,13 @@ def process_prediction(image, source="image", save=True, verbose=True):
         print("=" * 70)
         print("PREDICTION PROCESSING ERROR")
         print("=" * 70)
-        print("Error:", error)
+        print("Error:", type(error).__name__)
         print("=" * 70)
         print()
 
         return {
             "success": False,
             "message": "Prediction processing failed.",
-            "error": str(error),
         }, 500
 
     finally:

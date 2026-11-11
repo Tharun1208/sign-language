@@ -7,17 +7,19 @@ Serves:
     /settings (voice)       -> /api/v1/translation/speech
 """
 
+import logging
 import time
 import uuid
 
 from flask import Blueprint, jsonify, request
 
-from .. import config, state
+from .. import config, security, state
 from ..services import inference
 
 sessions_bp = Blueprint("sessions", __name__, url_prefix="/api/v1/recognition")
 history_bp = Blueprint("history", __name__, url_prefix="/api/v1")
 speech_bp = Blueprint("speech", __name__, url_prefix="/api/v1/translation")
+logger = logging.getLogger("signai.sessions")
 
 
 # ============================================================
@@ -65,7 +67,17 @@ def recognition_predict():
         }), 400
 
     try:
-        file_bytes = uploaded_file.read()
+        file_bytes = uploaded_file.stream.read(config.MAX_FRAME_UPLOAD_BYTES + 1)
+        if not file_bytes:
+            return jsonify({
+                "success": False,
+                "message": "Uploaded frame is empty.",
+            }), 400
+        if len(file_bytes) > config.MAX_FRAME_UPLOAD_BYTES:
+            return jsonify({
+                "success": False,
+                "message": "Uploaded frame exceeds the 5 MB limit.",
+            }), 413
 
         image = cv2.imdecode(
             np.frombuffer(file_bytes, dtype=np.uint8),
@@ -83,11 +95,13 @@ def recognition_predict():
         except (TypeError, ValueError):
             threshold = 0.5
 
+        auth_record = security.current_auth(request)
         response, status_code = inference.process_prediction(
             image,
             source="recognition",
             save=True,
             verbose=False,
+            user_id=auth_record["user"].get("id") if auth_record else None,
         )
 
         if status_code != 200 or not response.get("success"):
@@ -106,11 +120,10 @@ def recognition_predict():
         return jsonify(response), 200
 
     except Exception as error:
-        print("v1 recognition error:", error)
+        logger.error("Recognition failed (%s)", type(error).__name__)
         return jsonify({
             "success": False,
             "message": "Recognition failed.",
-            "error": str(error),
         }), 500
 
 
@@ -121,8 +134,20 @@ def recognition_predict():
 @history_bp.route("/history", methods=["GET"])
 def history():
 
+    record = security.current_auth(request)
+    if not record:
+        return jsonify({
+            "success": False,
+            "message": "Authentication is required.",
+        }), 401
+
+    user_id = str(record["user"].get("id", ""))
     with state.PREDICTIONS_LOCK:
-        snapshot = list(state.PREDICTIONS)
+        snapshot = [
+            item
+            for item in state.PREDICTIONS
+            if item.get("_user_id") == user_id
+        ]
 
     items = [
         {

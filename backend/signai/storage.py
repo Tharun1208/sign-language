@@ -13,6 +13,9 @@ import json
 import logging
 import os
 import re
+import tempfile
+import time
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
 from . import config, state
@@ -22,6 +25,8 @@ logger = logging.getLogger("signai.storage")
 _MONGO_CLIENT = None
 _MONGO_DB = None
 _MONGO_CONNECTED = False
+_LAST_MONGO_ATTEMPT = 0.0
+_MONGO_RETRY_INTERVAL = 30.0
 
 
 def _atomic_write_json(path: str, payload: Any) -> None:
@@ -30,21 +35,94 @@ def _atomic_write_json(path: str, payload: Any) -> None:
     if directory:
         os.makedirs(directory, exist_ok=True)
 
-    temporary_file = path + ".tmp"
-    with open(temporary_file, "w", encoding="utf-8") as file:
-        json.dump(payload, file, indent=2, ensure_ascii=False)
-    os.replace(temporary_file, path)
+    temporary_file = None
+    try:
+        descriptor, temporary_file = tempfile.mkstemp(
+            prefix=".signai-",
+            suffix=".tmp",
+            dir=directory or ".",
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as file:
+            json.dump(payload, file, indent=2, ensure_ascii=False)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary_file, path)
+        if os.name != "nt":
+            os.chmod(path, 0o600)
+    finally:
+        if temporary_file and os.path.exists(temporary_file):
+            os.remove(temporary_file)
+
+
+def _log_storage_error(level, message, error):
+    """Log storage failures without exception text that may contain secrets."""
+    logger.log(level, "%s (%s)", message, type(error).__name__)
+
+
+@contextmanager
+def _interprocess_file_lock(path):
+    """Lock a JSON read-modify-write operation across threads and processes."""
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+
+    with open(path + ".lock", "a+b") as lock_file:
+        if os.name == "nt":
+            import msvcrt
+
+            lock_file.seek(0)
+            if not lock_file.read(1):
+                lock_file.write(b"0")
+                lock_file.flush()
+            lock_file.seek(0)
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _users_file_lock():
+    return _interprocess_file_lock(config.USERS_FILE)
+
+
+def _read_users_file() -> List[Dict[str, Any]]:
+    try:
+        with open(config.USERS_FILE, "r", encoding="utf-8") as file:
+            data = json.load(file)
+        return data if isinstance(data, list) else []
+    except FileNotFoundError:
+        return []
 
 
 def init_mongo() -> bool:
     """Initialize MongoDB connection and test connectivity."""
-    global _MONGO_CLIENT, _MONGO_DB, _MONGO_CONNECTED
+    global _MONGO_CLIENT, _MONGO_DB, _MONGO_CONNECTED, _LAST_MONGO_ATTEMPT
 
     if not config.MONGO_URI:
         _MONGO_CONNECTED = False
         return False
 
+    now = time.monotonic()
+    if now - _LAST_MONGO_ATTEMPT < _MONGO_RETRY_INTERVAL:
+        return _MONGO_CONNECTED
+    _LAST_MONGO_ATTEMPT = now
+
     try:
+        if _MONGO_CLIENT is not None:
+            _MONGO_CLIENT.close()
+            _MONGO_CLIENT = None
+            _MONGO_DB = None
+
         from pymongo import MongoClient
 
         client = MongoClient(
@@ -64,12 +142,18 @@ def init_mongo() -> bool:
         _MONGO_DB.users.create_index("id", unique=True, sparse=True)
         _MONGO_DB.feedback.create_index("id", unique=True, sparse=True)
 
-        logger.info(f"Connected to MongoDB at {config.MONGO_URI}/{config.MONGO_DB_NAME}")
+        logger.info("Connected to MongoDB database %s", config.MONGO_DB_NAME)
         return True
 
     except Exception as exc:
-        logger.warning(f"MongoDB connection notice: {exc}. Using JSON file fallback.")
+        _log_storage_error(
+            logging.WARNING,
+            "MongoDB connection failed; using JSON file fallback",
+            exc,
+        )
         _MONGO_CONNECTED = False
+        _MONGO_CLIENT = None
+        _MONGO_DB = None
         return False
 
 
@@ -96,29 +180,47 @@ def ensure_users_file() -> None:
     """Ensure MongoDB connection or fallback file exists."""
     global _MONGO_CONNECTED
 
-    if _MONGO_CLIENT is None:
+    if _MONGO_CLIENT is None or not _MONGO_CONNECTED:
         init_mongo()
 
-    # Always ensure local json file exists as backup
+    # Migrate the pre-runtime path only when the runtime store is absent.
     try:
         if not os.path.exists(config.USERS_FILE):
-            _atomic_write_json(config.USERS_FILE, [])
+            source = config.LEGACY_USERS_FILE
+            if source != config.USERS_FILE and os.path.exists(source):
+                with open(source, "r", encoding="utf-8") as file:
+                    data = json.load(file)
+                if not isinstance(data, list):
+                    raise ValueError("Legacy user store must contain a list")
+                _atomic_write_json(config.USERS_FILE, data)
+            else:
+                _atomic_write_json(config.USERS_FILE, [])
     except Exception as err:
-        logger.warning(f"Could not initialize users.json backup: {err}")
+        _log_storage_error(
+            logging.WARNING,
+            "Could not initialize runtime user store",
+            err,
+        )
 
     # Auto-migrate from JSON into MongoDB if MongoDB is empty
     if _MONGO_CONNECTED and _MONGO_DB is not None:
         try:
-            mongo_count = _MONGO_DB.users.count_documents({})
-            if mongo_count == 0 and os.path.exists(config.USERS_FILE):
+            if os.path.exists(config.USERS_FILE):
                 with open(config.USERS_FILE, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 if isinstance(data, list) and data:
                     for u in data:
-                        _MONGO_DB.users.update_one({"id": u["id"]}, {"$set": u}, upsert=True)
+                        if not isinstance(u, dict) or not u.get("id"):
+                            raise ValueError("User record is missing its id")
+                        _MONGO_DB.users.update_one(
+                            {"id": u["id"]},
+                            {"$setOnInsert": u},
+                            upsert=True,
+                        )
                     logger.info(f"Migrated {len(data)} user(s) from users.json into MongoDB")
         except Exception as mig_err:
-            logger.warning(f"User migration notice: {mig_err}")
+            _log_storage_error(logging.WARNING, "User migration failed", mig_err)
+            _set_mongo_disconnected()
 
 
 def load_users() -> List[Dict[str, Any]]:
@@ -130,7 +232,12 @@ def load_users() -> List[Dict[str, Any]]:
             cursor = _MONGO_DB.users.find({}, {"_id": 0})
             return list(cursor)
         except Exception as exc:
-            logger.error(f"MongoDB load_users error: {exc}. Reading JSON backup.")
+            _log_storage_error(
+                logging.ERROR,
+                "MongoDB user load failed; reading JSON fallback",
+                exc,
+            )
+            _set_mongo_disconnected()
 
     # Fallback to JSON
     try:
@@ -138,15 +245,14 @@ def load_users() -> List[Dict[str, Any]]:
             data = json.load(file)
         return data if isinstance(data, list) else []
     except Exception as err:
-        logger.error(f"Error loading users from JSON: {err}")
+        _log_storage_error(logging.ERROR, "Loading users from JSON failed", err)
         return []
 
 
 def save_users(users: List[Dict[str, Any]]) -> bool:
     """Save user list to MongoDB and mirror to JSON file."""
     with state.USERS_LOCK:
-        success = True
-
+        mongo_success = False
         if _MONGO_CONNECTED and _MONGO_DB is not None:
             try:
                 for u in users:
@@ -157,17 +263,73 @@ def save_users(users: List[Dict[str, Any]]) -> bool:
                         {"$set": user_copy},
                         upsert=True,
                     )
+                mongo_success = True
             except Exception as exc:
-                logger.error(f"MongoDB save_users error: {exc}")
-                success = False
+                _log_storage_error(logging.ERROR, "Saving users to MongoDB failed", exc)
+                _set_mongo_disconnected()
 
         # Keep JSON backup updated
         try:
-            _atomic_write_json(config.USERS_FILE, users)
+            with _users_file_lock():
+                _atomic_write_json(config.USERS_FILE, users)
+            file_success = True
         except Exception as err:
-            logger.error(f"Error writing backup users.json: {err}")
+            _log_storage_error(logging.ERROR, "Writing users JSON fallback failed", err)
+            file_success = False
 
-        return success
+        return mongo_success or file_success
+
+
+def create_user(user: Dict[str, Any]) -> str:
+    """Atomically create an account; return created, exists, or failed."""
+    user_copy = dict(user)
+    user_copy.pop("_id", None)
+
+    with state.USERS_LOCK:
+        if _MONGO_CONNECTED and _MONGO_DB is not None:
+            try:
+                _MONGO_DB.users.insert_one(user_copy)
+            except Exception as exc:
+                from pymongo.errors import DuplicateKeyError
+
+                if isinstance(exc, DuplicateKeyError):
+                    return "exists"
+                _log_storage_error(
+                    logging.ERROR,
+                    "MongoDB account creation failed; using JSON fallback",
+                    exc,
+                )
+                _set_mongo_disconnected()
+            else:
+                try:
+                    users = list(_MONGO_DB.users.find({}, {"_id": 0}))
+                    with _users_file_lock():
+                        _atomic_write_json(config.USERS_FILE, users)
+                except Exception as exc:
+                    _log_storage_error(
+                        logging.ERROR,
+                        "MongoDB account was created, but the JSON mirror failed",
+                        exc,
+                    )
+                return "created"
+
+        try:
+            with _users_file_lock():
+                users = _read_users_file()
+                email = str(user_copy.get("email", "")).strip().lower()
+                user_id = str(user_copy.get("id", ""))
+                if any(
+                    str(existing.get("email", "")).strip().lower() == email
+                    or str(existing.get("id", "")) == user_id
+                    for existing in users
+                ):
+                    return "exists"
+                users.append(user_copy)
+                _atomic_write_json(config.USERS_FILE, users)
+            return "created"
+        except Exception as exc:
+            _log_storage_error(logging.ERROR, "JSON account creation failed", exc)
+            return "failed"
 
 
 def save_single_user(user: Dict[str, Any]) -> bool:
@@ -184,7 +346,12 @@ def save_single_user(user: Dict[str, Any]) -> bool:
                     upsert=True,
                 )
             except Exception as exc:
-                logger.error(f"MongoDB save_single_user error: {exc}")
+                _log_storage_error(
+                    logging.ERROR,
+                    "Saving one user to MongoDB failed",
+                    exc,
+                )
+                _set_mongo_disconnected()
 
         # Mirror in JSON
         try:
@@ -197,7 +364,7 @@ def save_single_user(user: Dict[str, Any]) -> bool:
             _atomic_write_json(config.USERS_FILE, all_users)
             return True
         except Exception as err:
-            logger.error(f"Error updating backup JSON: {err}")
+            _log_storage_error(logging.ERROR, "Updating users JSON fallback failed", err)
             return False
 
 
@@ -215,7 +382,8 @@ def find_user_by_email(email: str) -> Optional[Dict[str, Any]]:
             if user:
                 return user
         except Exception as exc:
-            logger.error(f"MongoDB find_user_by_email error: {exc}")
+            _log_storage_error(logging.ERROR, "MongoDB email lookup failed", exc)
+            _set_mongo_disconnected()
 
     # Fallback lookup
     for user in load_users():
@@ -238,7 +406,8 @@ def find_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
             if user:
                 return user
         except Exception as exc:
-            logger.error(f"MongoDB find_user_by_id error: {exc}")
+            _log_storage_error(logging.ERROR, "MongoDB user lookup failed", exc)
+            _set_mongo_disconnected()
 
     # Fallback lookup
     for user in load_users():
@@ -256,28 +425,91 @@ def ensure_feedback_file() -> None:
     """Ensure feedback collection and backup file exist."""
     global _MONGO_CONNECTED
 
-    if _MONGO_CLIENT is None:
+    if _MONGO_CLIENT is None or not _MONGO_CONNECTED:
         init_mongo()
 
     try:
         if not os.path.exists(config.FEEDBACK_FILE):
-            _atomic_write_json(config.FEEDBACK_FILE, [])
+            source = config.LEGACY_FEEDBACK_FILE
+            if source != config.FEEDBACK_FILE and os.path.exists(source):
+                with open(source, "r", encoding="utf-8") as file:
+                    data = json.load(file)
+                if not isinstance(data, list):
+                    raise ValueError("Legacy feedback store must contain a list")
+                _atomic_write_json(config.FEEDBACK_FILE, data)
+            else:
+                _atomic_write_json(config.FEEDBACK_FILE, [])
     except Exception as err:
-        logger.warning(f"Could not initialize feedback.json: {err}")
+        _log_storage_error(
+            logging.WARNING,
+            "Could not initialize runtime feedback store",
+            err,
+        )
 
-    # Auto-migrate feedback into MongoDB if collection is empty
+    # Merge fallback records without overwriting newer MongoDB records.
     if _MONGO_CONNECTED and _MONGO_DB is not None:
         try:
-            fb_count = _MONGO_DB.feedback.count_documents({})
-            if fb_count == 0 and os.path.exists(config.FEEDBACK_FILE):
+            if os.path.exists(config.FEEDBACK_FILE):
                 with open(config.FEEDBACK_FILE, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 if isinstance(data, list) and data:
                     for item in data:
-                        _MONGO_DB.feedback.update_one({"id": item["id"]}, {"$set": item}, upsert=True)
+                        if not isinstance(item, dict) or not item.get("id"):
+                            raise ValueError("Feedback record is missing its id")
+                        _MONGO_DB.feedback.update_one(
+                            {"id": item["id"]},
+                            {"$setOnInsert": item},
+                            upsert=True,
+                        )
                     logger.info(f"Migrated {len(data)} feedback record(s) into MongoDB")
         except Exception as mig_err:
-            logger.warning(f"Feedback migration notice: {mig_err}")
+            _log_storage_error(
+                logging.WARNING,
+                "Feedback migration failed",
+                mig_err,
+            )
+            _set_mongo_disconnected()
+
+
+@contextmanager
+def _feedback_file_lock():
+    """Lock JSON read-modify-write operations across threads and processes."""
+    with _interprocess_file_lock(config.FEEDBACK_FILE):
+        yield
+
+
+def _read_feedback_file() -> List[Dict[str, Any]]:
+    try:
+        with open(config.FEEDBACK_FILE, "r", encoding="utf-8") as file:
+            data = json.load(file)
+        return data if isinstance(data, list) else []
+    except FileNotFoundError:
+        return []
+
+
+def _write_feedback_file(items: List[Dict[str, Any]]) -> bool:
+    try:
+        with _feedback_file_lock():
+            _atomic_write_json(config.FEEDBACK_FILE, items)
+        return True
+    except Exception as err:
+        _log_storage_error(logging.ERROR, "Writing feedback JSON fallback failed", err)
+        return False
+
+
+def _mirror_feedback_from_mongo() -> None:
+    if not _MONGO_CONNECTED or _MONGO_DB is None:
+        return
+    try:
+        items = list(_MONGO_DB.feedback.find({}, {"_id": 0}))
+        if not _write_feedback_file(items):
+            logger.error("Feedback was stored in MongoDB, but the JSON mirror could not be updated")
+    except Exception as err:
+        _log_storage_error(
+            logging.ERROR,
+            "Feedback was stored in MongoDB, but mirroring failed",
+            err,
+        )
 
 
 def load_feedback() -> List[Dict[str, Any]]:
@@ -290,24 +522,113 @@ def load_feedback() -> List[Dict[str, Any]]:
                 cursor = _MONGO_DB.feedback.find({}, {"_id": 0})
                 return list(cursor)
             except Exception as exc:
-                logger.error(f"MongoDB load_feedback error: {exc}")
+                _log_storage_error(logging.ERROR, "MongoDB feedback load failed", exc)
+                _set_mongo_disconnected()
 
         try:
-            with open(config.FEEDBACK_FILE, "r", encoding="utf-8") as file:
-                data = json.load(file)
-            return data if isinstance(data, list) else []
+            with _feedback_file_lock():
+                return _read_feedback_file()
         except Exception as err:
-            logger.error(f"Error loading feedback: {err}")
+            _log_storage_error(logging.ERROR, "Loading feedback JSON failed", err)
             return []
 
 
-def save_feedback(items: List[Dict[str, Any]]) -> bool:
-    """Save feedback items to MongoDB and backup JSON."""
+def _set_mongo_disconnected() -> None:
+    global _MONGO_CLIENT, _MONGO_DB, _MONGO_CONNECTED
+    _MONGO_CONNECTED = False
+    if _MONGO_CLIENT is not None:
+        try:
+            _MONGO_CLIENT.close()
+        except Exception as error:
+            _log_storage_error(
+                logging.WARNING,
+                "Closing MongoDB connection failed",
+                error,
+            )
+        finally:
+            _MONGO_CLIENT = None
+            _MONGO_DB = None
+
+
+def add_feedback(item: Dict[str, Any]) -> bool:
+    """Atomically append feedback to MongoDB or the JSON fallback."""
     ensure_feedback_file()
 
     with state.FEEDBACK_LOCK:
-        success = True
+        if _MONGO_CONNECTED and _MONGO_DB is not None:
+            try:
+                _MONGO_DB.feedback.insert_one(dict(item))
+                _mirror_feedback_from_mongo()
+                return True
+            except Exception as exc:
+                _log_storage_error(
+                    logging.ERROR,
+                    "MongoDB feedback insert failed; switching to JSON fallback",
+                    exc,
+                )
+                _set_mongo_disconnected()
 
+        try:
+            with _feedback_file_lock():
+                items = _read_feedback_file()
+                items.insert(0, item)
+                _atomic_write_json(config.FEEDBACK_FILE, items)
+            return True
+        except Exception as err:
+            _log_storage_error(logging.ERROR, "Saving feedback JSON fallback failed", err)
+            return False
+
+
+def update_feedback_status(feedback_id: str, status: str, reviewed_at: float):
+    """Atomically update a feedback record; return the updated record or None."""
+    ensure_feedback_file()
+
+    with state.FEEDBACK_LOCK:
+        if _MONGO_CONNECTED and _MONGO_DB is not None:
+            try:
+                from pymongo import ReturnDocument
+
+                updated = _MONGO_DB.feedback.find_one_and_update(
+                    {"id": feedback_id},
+                    {"$set": {
+                        "review_status": status,
+                        "reviewed_at": reviewed_at,
+                    }},
+                    projection={"_id": 0},
+                    return_document=ReturnDocument.AFTER,
+                )
+                if updated:
+                    _mirror_feedback_from_mongo()
+                    return updated
+                return None
+            except Exception as exc:
+                _log_storage_error(
+                    logging.ERROR,
+                    "MongoDB feedback update failed; switching to JSON fallback",
+                    exc,
+                )
+                _set_mongo_disconnected()
+
+        try:
+            with _feedback_file_lock():
+                items = _read_feedback_file()
+                for item in items:
+                    if item.get("id") == feedback_id:
+                        item["review_status"] = status
+                        item["reviewed_at"] = reviewed_at
+                        _atomic_write_json(config.FEEDBACK_FILE, items)
+                        return item
+        except Exception as err:
+            _log_storage_error(logging.ERROR, "Updating feedback JSON fallback failed", err)
+        return None
+
+
+def save_feedback(items: List[Dict[str, Any]]) -> bool:
+    """Compatibility helper that mirrors a complete feedback snapshot."""
+    ensure_feedback_file()
+
+    with state.FEEDBACK_LOCK:
+        mongo_success = False
         if _MONGO_CONNECTED and _MONGO_DB is not None:
             try:
                 for item in items:
@@ -318,13 +639,11 @@ def save_feedback(items: List[Dict[str, Any]]) -> bool:
                         {"$set": item_copy},
                         upsert=True,
                     )
+                mongo_success = True
             except Exception as exc:
-                logger.error(f"MongoDB save_feedback error: {exc}")
-                success = False
+                _log_storage_error(logging.ERROR, "Saving feedback to MongoDB failed", exc)
+                _set_mongo_disconnected()
 
-        try:
-            _atomic_write_json(config.FEEDBACK_FILE, items)
-        except Exception as err:
-            logger.error(f"Error saving feedback to JSON: {err}")
+        file_success = _write_feedback_file(items)
 
-        return success
+        return mongo_success or file_success

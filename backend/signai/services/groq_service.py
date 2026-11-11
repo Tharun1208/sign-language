@@ -206,7 +206,7 @@ def refine_sentence(
             "message": "Groq library is not installed in the environment.",
         }
     except Exception as exc:
-        logger.error(f"Groq API refinement error: {exc}")
+        logger.error("Groq API refinement failed (%s)", type(exc).__name__)
         # Always return a valid response so UI never breaks
         return {
             "success": True,

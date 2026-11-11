@@ -19,6 +19,8 @@ signai-env/
 backend/dataset/
 backend/uploads/
 backend/data/
+backend/users.json
+backend/feedback.json
 
 # Frontend dependencies & builds
 frontend/node_modules/
@@ -27,6 +29,8 @@ frontend/.cache/
 
 # Logs
 *.log
+*.tmp
+*.lock
 
 # OS & Editor files
 .DS_Store

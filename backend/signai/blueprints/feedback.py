@@ -22,7 +22,12 @@ feedback_bp = Blueprint("feedback", __name__, url_prefix="/api/v1/feedback")
 @feedback_bp.route("/", methods=["POST"])
 def submit():
 
-    data = request.get_json(silent=True) or request.form.to_dict()
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({
+            "success": False,
+            "message": "A JSON request body is required.",
+        }), 400
 
     correction = str(data.get("correction", "")).strip().upper()
     prediction = str(data.get("prediction", "")).strip().upper()
@@ -33,7 +38,7 @@ def submit():
             "message": "Provide the prediction or a correction.",
         }), 400
 
-    if not bool(data.get("consent")):
+    if data.get("consent") is not True:
         return jsonify({
             "success": False,
             "message": (
@@ -43,8 +48,6 @@ def submit():
         }), 400
 
     record = security.current_auth(request)
-
-    items = storage.load_feedback()
 
     item = {
         "id": uuid.uuid4().hex,
@@ -61,9 +64,7 @@ def submit():
         "created_at": time.time(),
     }
 
-    items.insert(0, item)
-
-    if not storage.save_feedback(items):
+    if not storage.add_feedback(item):
         return jsonify({"success": False, "message": "Unable to store feedback."}), 500
 
     return jsonify({
@@ -76,6 +77,12 @@ def submit():
 @feedback_bp.route("", methods=["GET"])
 @feedback_bp.route("/", methods=["GET"])
 def list_items():
+
+    if not security.current_auth(request):
+        return jsonify({
+            "success": False,
+            "message": "Authentication is required.",
+        }), 401
 
     items = storage.load_feedback()
 
@@ -100,22 +107,32 @@ def list_items():
 @feedback_bp.route("/<feedback_id>/review", methods=["POST"])
 def review(feedback_id):
 
-    data = request.get_json(silent=True) or {}
+    record = security.current_auth(request)
+    if not security.is_feedback_moderator(record):
+        return jsonify({
+            "success": False,
+            "message": "Moderator authorization is required.",
+        }), 403
 
-    items = storage.load_feedback()
-    updated = None
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({
+            "success": False,
+            "message": "A JSON request body is required.",
+        }), 400
+    status = data.get("status", "reviewed")
+    if not isinstance(status, str) or status not in {"pending", "reviewed", "rejected"}:
+        return jsonify({
+            "success": False,
+            "message": "Status must be pending, reviewed or rejected.",
+        }), 400
 
-    for item in items:
-        if item.get("id") == feedback_id:
-            item["review_status"] = data.get("status", "reviewed")
-            item["reviewed_at"] = time.time()
-            updated = item
-            break
-
+    updated = storage.update_feedback_status(
+        feedback_id,
+        status,
+        time.time(),
+    )
     if updated is None:
         return jsonify({"success": False, "message": "Feedback not found."}), 404
-
-    if not storage.save_feedback(items):
-        return jsonify({"success": False, "message": "Unable to update feedback."}), 500
 
     return jsonify({"success": True, "feedback": updated})
